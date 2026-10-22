@@ -115,6 +115,17 @@ jobs:
           ./unixnu fetch xnu libplatform libdispatch AvailabilityVersions libpthread \
                           corecrypto-2023 IOStorageFamily -D "$GITHUB_WORKSPACE/device"
 
+      # The prelink binds the native kernel to the original kexts, so it needs the
+      # kernelcache, the device tree and the trust caches of the target IPSW. Fetch
+      # them before the kernel step; prelink runs right after the link.
+      - name: Fetch the target IPSW members
+        env:
+          IPSW_URL: ${{ inputs.ipsw_url }}
+        run: |
+          args=()
+          if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
+          ./unixnu ipsw fetch "${args[@]}"
+
       - name: Prepare inputs
         env:
           TRUST_CACHE_URL: ${{ inputs.trust_cache_url }}
