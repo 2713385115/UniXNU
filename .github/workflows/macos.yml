@@ -55,6 +55,10 @@ on:
         description: Upload the userdata image (large)
         type: boolean
         default: false
+      runner:
+        description: Runner label (macos-latest, macos-15, macos-14)
+        required: false
+        default: macos-latest
 
 permissions:
   contents: read
@@ -69,7 +73,7 @@ env:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
