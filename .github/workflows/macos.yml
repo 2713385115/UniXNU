@@ -20,6 +20,7 @@ on:
         type: choice
         options:
           - kernel
+          - kernel payload
           - kernel userdata
           - kernel userdata payload
         default: kernel userdata
@@ -59,6 +60,10 @@ on:
         description: Runner label (macos-latest, macos-15, macos-14)
         required: false
         default: macos-latest
+      unique_chip_id:
+        description: Platform seed for /chosen/unique-chip-id (16 hex digits, nonzero)
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -135,6 +140,17 @@ jobs:
         run: |
           if [ -n "$TRUST_CACHE_URL" ]; then
             curl -fL "$TRUST_CACHE_URL" -o "$RUNNER_TEMP/trustcache"
+          elif [ ! -f "$RUNNER_TEMP/trustcache" ]; then
+            # The payload binds the prelinked kernel to the original kexts, so it needs the
+            # trust cache of the target IPSW. "unixnu ipsw fetch" already extracted it into
+            # out/<device>/ipsw/<build>/; reuse it instead of asking for a URL.
+            found=$(ls out/*/ipsw/*/StaticTrustCache* 2>/dev/null | grep -v '\.json$' | head -1 || true)
+            if [ -n "$found" ]; then
+              cp "$found" "$RUNNER_TEMP/trustcache"
+              echo "trust cache taken from $found"
+            else
+              echo "no StaticTrustCache in the extracted IPSW; the payload will be written without one" >&2
+            fi
           fi
           if [ -n "$DATA_SEED_URL" ]; then
             curl -fL "$DATA_SEED_URL" -o "$RUNNER_TEMP/data.dbr"
@@ -215,7 +231,7 @@ jobs:
         if: contains(inputs.steps, 'payload')
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+          UNIQUE_CHIP_ID: ${{ inputs.unique_chip_id || secrets.UNIXNU_UNIQUE_CHIP_ID }}
           SKIP_SETUP: ${{ inputs.skip_setup }}
           OWNER_TRUST_CACHE: ${{ inputs.owner_trust_cache }}
         run: |
