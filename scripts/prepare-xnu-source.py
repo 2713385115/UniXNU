@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import time
 import urllib.request
 
 # Tags of the Apple sources that still carry the headers newer xnu omits; feeds.toml sets them for the unixnu driver.
@@ -14,6 +15,26 @@ DESTINATION = Path('.cache/xnu-work/iokit/DriverKit')
 CACHE = Path(f'.cache/sources/xnu-driverkit-{TAG.removeprefix("xnu-")}.json')
 URL = f'https://api.github.com/repos/apple-oss-distributions/xnu/contents/iokit/DriverKit?ref={TAG}'
 
+# A hosted runner shares its IP with many jobs, so the 60 requests/hour anonymous
+# budget of the GitHub API is usually already spent and the listings come back 403.
+# Passing the job token lifts the budget to 5000/hour; the retries cover the
+# occasional dropped TLS connection as well.
+TOKEN = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN') or ''
+
+
+def fetch(url, attempts=5):
+    last = None
+    for attempt in range(attempts):
+        headers = {'User-Agent': 'unixnu-prepare-xnu-source'}
+        if TOKEN and url.startswith('https://api.github.com/'):
+            headers['Authorization'] = f'Bearer {TOKEN}'
+        try:
+            return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30).read()
+        except Exception as exc:  # noqa: BLE001 - retry every transport/HTTP fault
+            last = exc
+            time.sleep(3 * (attempt + 1))
+    raise RuntimeError(f'{url} failed after {attempts} attempts: {last}')
+
 
 def restore(entry, destination=DESTINATION, tag=TAG):
     if entry['type'] != 'file' or not entry['name'].endswith('.h'):
@@ -22,7 +43,7 @@ def restore(entry, destination=DESTINATION, tag=TAG):
     target = destination / name
     if target.exists():
         return None
-    data = urllib.request.urlopen(entry['download_url'], timeout=30).read()
+    data = fetch(entry['download_url'])
     digest = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
     if digest != entry['sha']:
         raise ValueError(f'Git blob hash mismatch: {entry["name"]}')
@@ -37,12 +58,12 @@ if __name__ == '__main__':
         raise SystemExit('Create the local XNU work source before preparing headers')
     if not CACHE.exists():
         CACHE.parent.mkdir(parents=True, exist_ok=True)
-        CACHE.write_bytes(urllib.request.urlopen(URL, timeout=30).read())
+        CACHE.write_bytes(fetch(URL))
     entries = json.loads(CACHE.read_text())
     crypto_cache = CACHE.with_name(f'xnu-driverkit-crypto-{TAG.removeprefix("xnu-")}.json')
     if not crypto_cache.exists():
         crypto_url = URL.replace('/DriverKit?', '/DriverKit/crypto?')
-        crypto_cache.write_bytes(urllib.request.urlopen(crypto_url, timeout=30).read())
+        crypto_cache.write_bytes(fetch(crypto_url))
     for entry in json.loads(crypto_cache.read_text()):
         entry['relative'] = 'crypto/' + entry['name']
         entries.append(entry)
@@ -53,7 +74,7 @@ if __name__ == '__main__':
         if not trust_cache.exists():
             url = ('https://api.github.com/repos/apple-oss-distributions/xnu/'
                    f'contents/EXTERNAL_HEADERS/TrustCache?ref={trust_tag}')
-            trust_cache.write_bytes(urllib.request.urlopen(url, timeout=30).read())
+            trust_cache.write_bytes(fetch(url))
         trust_destination = Path('.cache/xnu-work/EXTERNAL_HEADERS/TrustCache')
         def restore_trust(entry):
             return restore(entry, trust_destination, trust_tag)
