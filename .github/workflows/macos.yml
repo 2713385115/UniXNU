@@ -145,6 +145,7 @@ jobs:
 
       - name: Build kernel
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           IPSW_URL: ${{ inputs.ipsw_url }}
         run: |
           args=()
@@ -154,6 +155,7 @@ jobs:
       - name: Build userdata
         if: contains(inputs.steps, 'userdata')
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           IPSW_URL: ${{ inputs.ipsw_url }}
         run: |
           args=()
@@ -163,6 +165,7 @@ jobs:
       - name: Build payload
         if: contains(inputs.steps, 'payload')
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
           SKIP_SETUP: ${{ inputs.skip_setup }}
           OWNER_TRUST_CACHE: ${{ inputs.owner_trust_cache }}
