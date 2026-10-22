@@ -143,9 +143,11 @@ jobs:
           elif [ ! -f "$RUNNER_TEMP/trustcache" ]; then
             # The payload binds the prelinked kernel to the original kexts, so it needs the
             # trust cache of the target IPSW. "unixnu ipsw fetch" already extracted it into
-            # out/<device>/ipsw/<build>/; reuse it instead of asking for a URL.
-            found=$(ls out/*/ipsw/*/StaticTrustCache* 2>/dev/null | grep -v '\.json$' | head -1 || true)
-            if [ -n "$found" ]; then
+            # out/ipsw/<build>/ (note: no device directory level), so reuse it instead of
+            # asking for a URL. The .json sibling names the component it came from.
+            found=$(grep -l '"component": "StaticTrustCache"' out/ipsw/*/*.json out/*/ipsw/*/*.json 2>/dev/null \
+                    | head -1 | sed 's/\.json$//' || true)
+            if [ -n "$found" ] && [ -f "$found" ]; then
               cp "$found" "$RUNNER_TEMP/trustcache"
               echo "trust cache taken from $found"
             else
