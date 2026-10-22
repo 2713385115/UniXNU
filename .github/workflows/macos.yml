@@ -156,6 +156,40 @@ jobs:
           if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
           ./unixnu build kernel "${args[@]}"
 
+      - name: Kernel diagnostics
+        if: failure()
+        run: |
+          xcodebuild -version || true
+          mkdir -p "$RUNNER_TEMP/diag"
+          for f in out/*/logs/*.log; do
+            [ -f "$f" ] || continue
+            b=$(basename "$f")
+            echo "===== $f ($(wc -l < "$f") lines)"
+            echo "--- error lines"
+            grep -n -i -E 'error|undefined|unable|no such|cannot find|ld: |clang: ' "$f" | tail -80 || true
+            echo "--- tail"
+            tail -n 120 "$f" || true
+            {
+              echo "lines: $(wc -l < "$f")"
+              grep -n -i -E 'error|undefined|unable|no such|cannot find|ld: |clang: ' "$f" | tail -400 || true
+              echo '--- tail 400 ---'
+              tail -n 400 "$f" || true
+            } > "$RUNNER_TEMP/diag/$b.trimmed.txt" 2>/dev/null || true
+          done
+          echo "===== compile records present ====="
+          ls -la out/*/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/startup.o.json 2>/dev/null || echo "no startup.o.json"
+          echo "===== filelists ====="
+          find out -name '*.filelist' -o -name 'all-alias.exp' 2>/dev/null | head -30 || true
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: ${{ runner.temp }}/diag
+          if-no-files-found: warn
+          retention-days: 5
+
       - name: Build userdata
         if: contains(inputs.steps, 'userdata')
         env:
