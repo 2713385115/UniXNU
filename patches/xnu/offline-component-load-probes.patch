@@ -121,7 +121,7 @@
  	/* Initial proc_uuid_policy subsystem */
 --- a/iokit/Kernel/IOUserClient.cpp
 +++ b/iokit/Kernel/IOUserClient.cpp
-@@ -6693,4 +6693,67 @@
+@@ -6693,3 +6693,66 @@
  OSMetaClassDefineReservedUnused(IOUserClient2022, 1);
  OSMetaClassDefineReservedUnused(IOUserClient2022, 2);
  OSMetaClassDefineReservedUnused(IOUserClient2022, 3);
