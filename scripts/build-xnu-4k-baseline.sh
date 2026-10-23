@@ -618,16 +618,19 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
     fi
     KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$STORAGE_FAMILY_ARCHIVE"
     KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $STORAGE_FAMILY_ARCHIVE"
-    # The VerifiedRoot kit only produces a real archive after a signature and block audit of the original OS
-    # image. Until that exists, build-verified-root-stub.py compiles refusing policies and merges that object
-    # into build/native-ufs/libNativeUfs.a, so nothing extra is needed here: the archive this block already
-    # force-loads carries them. Their definitions sit beside NativeUfs.o, which refers to them.
-    if [ -f "$ROOT/build/verified-root-stub/VerifiedRootStub.o" ]; then
+    # NativeUfs.o refers to the VerifiedRoot policy symbols, so their definitions have to sit in the
+    # archive this block force-loads, beside that object. Two builders put them there, and both merge
+    # into build/native-ufs/libNativeUfs.a rather than adding a link input: build-verified-root-bundle.py
+    # for the owner-signed envelopes, build-verified-root-stub.py for the refusing stand-ins used before
+    # any envelope existed. Either way the symbols must read back as defined from the merged archive,
+    # which is what the kernel link actually loads.
+    if [ -f "$ROOT/build/verified-root-stub/VerifiedRootStub.o" ] || \
+       [ -f "$ROOT/build/verified-root-bundle/verified_root.o" ]; then
       UFS_NM=$ROOT/build/native-ufs/native-ufs.nm
       xcrun nm -g "$UFS_ARCHIVE" > "$UFS_NM" 2>/dev/null || true
       if ! grep -qE '^[0-9a-f]+ [A-Za-z] _verified_root_key$' "$UFS_NM"; then
-        echo "$UFS_ARCHIVE lacks _verified_root_key: build-verified-root-stub.py must run after" >&2
-        echo "build-arm-driver.py NativeUfs in the board's [kernel] archives." >&2
+        echo "$UFS_ARCHIVE lacks _verified_root_key: build-verified-root-bundle.py (or the stub) must" >&2
+        echo "run after build-arm-driver.py NativeUfs in the board's [kernel] archives." >&2
         exit 1
       fi
     fi
