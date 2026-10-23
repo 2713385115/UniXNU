@@ -606,7 +606,7 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
     # into build/native-ufs/libNativeUfs.a, so nothing extra is needed here: the archive this block already
     # force-loads carries them. Their definitions sit beside NativeUfs.o, which refers to them.
     if [ -f "$ROOT/build/verified-root-stub/VerifiedRootStub.o" ] && \
-       ! xcrun nm -g "$UFS_ARCHIVE" 2>/dev/null | grep -q ' _verified_root_key$'; then
+       ! xcrun nm -g "$UFS_ARCHIVE" 2>/dev/null | grep -qE '^[0-9a-f]+ [A-Za-z] _verified_root_key$'; then
       echo "$UFS_ARCHIVE lacks _verified_root_key: build-verified-root-stub.py must run after" >&2
       echo "build-arm-driver.py NativeUfs in the board's [kernel] archives." >&2
       exit 1
