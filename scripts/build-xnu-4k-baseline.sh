@@ -605,8 +605,14 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
       echo "No $STORAGE_FAMILY_ARCHIVE: add build-storage-bindings.py to the board's [kernel] archives." >&2
       exit 1
     fi
-    if ! xcrun nm -g --defined-only "$STORAGE_FAMILY_ARCHIVE" 2>/dev/null |
-         grep -q ' _ZTV20IOBlockStorageDevice$'; then
+    # nm through a file: with pipefail, "nm | grep -q" reports nm's SIGPIPE as a
+    # failed pipeline as soon as grep matches, which reads as "no match here".
+    BINDINGS_NM=$ROOT/build/io-storage-family/bindings.nm
+    if ! xcrun nm -g --defined-only "$STORAGE_FAMILY_ARCHIVE" > "$BINDINGS_NM" 2>&1; then
+      echo "$STORAGE_FAMILY_ARCHIVE is not readable: $(tail -3 "$BINDINGS_NM")" >&2
+      exit 1
+    fi
+    if ! grep -q ' _ZTV20IOBlockStorageDevice$' "$BINDINGS_NM"; then
       echo "$STORAGE_FAMILY_ARCHIVE lacks the IOStorageFamily vtable binding" >&2
       exit 1
     fi
@@ -616,11 +622,14 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
     # image. Until that exists, build-verified-root-stub.py compiles refusing policies and merges that object
     # into build/native-ufs/libNativeUfs.a, so nothing extra is needed here: the archive this block already
     # force-loads carries them. Their definitions sit beside NativeUfs.o, which refers to them.
-    if [ -f "$ROOT/build/verified-root-stub/VerifiedRootStub.o" ] && \
-       ! xcrun nm -g "$UFS_ARCHIVE" 2>/dev/null | grep -qE '^[0-9a-f]+ [A-Za-z] _verified_root_key$'; then
-      echo "$UFS_ARCHIVE lacks _verified_root_key: build-verified-root-stub.py must run after" >&2
-      echo "build-arm-driver.py NativeUfs in the board's [kernel] archives." >&2
-      exit 1
+    if [ -f "$ROOT/build/verified-root-stub/VerifiedRootStub.o" ]; then
+      UFS_NM=$ROOT/build/native-ufs/native-ufs.nm
+      xcrun nm -g "$UFS_ARCHIVE" > "$UFS_NM" 2>/dev/null || true
+      if ! grep -qE '^[0-9a-f]+ [A-Za-z] _verified_root_key$' "$UFS_NM"; then
+        echo "$UFS_ARCHIVE lacks _verified_root_key: build-verified-root-stub.py must run after" >&2
+        echo "build-arm-driver.py NativeUfs in the board's [kernel] archives." >&2
+        exit 1
+      fi
     fi
     # NativeUfs declares boot_progress_poll weak and calls it from the verified read path. On Darwin a plain
     # weak declaration is not a weak import, so the reference must still be satisfied. The real definition is
