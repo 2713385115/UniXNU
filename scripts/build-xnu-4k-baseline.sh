@@ -612,8 +612,9 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
       echo "$STORAGE_FAMILY_ARCHIVE is not readable: $(tail -3 "$BINDINGS_NM")" >&2
       exit 1
     fi
-    if ! grep -q ' _ZTV20IOBlockStorageDevice$' "$BINDINGS_NM"; then
-      echo "$STORAGE_FAMILY_ARCHIVE lacks the IOStorageFamily vtable binding" >&2
+    if ! grep -q 'ZTV20IOBlockStorageDevice' "$BINDINGS_NM"; then
+      echo "$STORAGE_FAMILY_ARCHIVE lacks the IOStorageFamily vtable binding; nm said:" >&2
+      head -5 "$BINDINGS_NM" >&2
       exit 1
     fi
     KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$STORAGE_FAMILY_ARCHIVE"
