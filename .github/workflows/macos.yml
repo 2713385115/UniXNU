@@ -175,6 +175,9 @@ jobs:
         env:
           PRE_BUILD: ${{ inputs.pre_build }}
           DEVICE_DIR: ${{ github.workspace }}/device
+          # The owner policy envelopes live on a release, so the steps need to be able
+          # to read it; the default token is enough for a private repository.
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash -euo pipefail -c "$PRE_BUILD"
 
       - name: Build kernel
