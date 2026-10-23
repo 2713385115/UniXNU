@@ -159,5 +159,10 @@ if missing:
 archive = OUT / 'libVerifiedRootStub.a'
 archive.unlink(missing_ok=True)
 subprocess.run(['xcrun', 'ar', 'rcs', archive, destination], check=True)
+# The kernel link takes the object, not the archive (see build-xnu-4k-baseline.sh): an object on the link line
+# is always loaded, while -force_load around a conditional left the symbols out without a word. Both are left
+# here because the archive is what the VerifiedRoot kit itself would produce.
 print('VerifiedRootStub: refusing policy provider linked as a placeholder '
       '(policy_count=0, no block device can publish)')
+print('VerifiedRootStub: %s exports %d external symbols; %s' %
+      (destination, len(found), archive.name))
