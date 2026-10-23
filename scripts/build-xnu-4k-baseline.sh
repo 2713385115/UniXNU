@@ -588,15 +588,26 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
     KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $UFS_ARCHIVE"
   fi
   # Every built-in block driver derives from IOBlockStorageDevice, which is not part of XNU: it lives in the
-  # IOStorageFamily kext, of which the tree carries only the public headers. Linking a driver without the
-  # compiled class fails on "vtable for IOBlockStorageDevice" plus its out-of-line destructor and
-  # getProperty(). build-io-storage-family.py compiles exactly those sources out of refer/IOStorageFamily, so
-  # this is the real implementation rather than a placeholder.
+  # IOStorageFamily kext. That kext is already in the image as a prelinked kext, so compiling its sources in
+  # here would register the class twice and stop the boot with
+  #
+  #   OSMetaClass: Kext com.apple.iokit.IOStorageFamily class IOBlockStorageDevice is a duplicate;
+  #   kext __kernel__ already has a class by that name.
+  #
+  # Instead the driver keeps its own subclass and every inherited entry is bound to the original prelinked code
+  # through absolute symbols (the same mechanism build-native-virtio-bindings.py uses for the other two
+  # transports). build-storage-bindings.py emits that archive from scripts/prelink-storage-bindings.json, the
+  # measured ABI of the kext.
   if [ "${XNU_NATIVE_UFS:-0}" = 1 ] || [ "${XNU_NATIVE_RAM_BLOCK:-0}" = 1 ] || \
      [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" = 1 ]; then
-    STORAGE_FAMILY_ARCHIVE=$ROOT/build/io-storage-family/libIOStorageFamily.a
+    STORAGE_FAMILY_ARCHIVE=$ROOT/build/io-storage-family/libStorageBindings.a
     if [ ! -f "$STORAGE_FAMILY_ARCHIVE" ]; then
-      echo "No $STORAGE_FAMILY_ARCHIVE: add build-io-storage-family.py to the board's [kernel] archives." >&2
+      echo "No $STORAGE_FAMILY_ARCHIVE: add build-storage-bindings.py to the board's [kernel] archives." >&2
+      exit 1
+    fi
+    if ! xcrun nm -g --defined-only "$STORAGE_FAMILY_ARCHIVE" 2>/dev/null |
+         grep -q ' _ZTV20IOBlockStorageDevice$'; then
+      echo "$STORAGE_FAMILY_ARCHIVE lacks the IOStorageFamily vtable binding" >&2
       exit 1
     fi
     KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$STORAGE_FAMILY_ARCHIVE"
