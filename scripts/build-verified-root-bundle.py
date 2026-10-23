@@ -184,11 +184,19 @@ def main() -> int:
     assembly.write_text('\n'.join(text) + '\n')
 
     destination = OUT / 'verified-root-policies.o'
+    # The assembly has to carry the same platform as the C objects, or ld refuses it with
+    # "building for 'iOS', but linking in object file built for 'macOS'". Only -target does
+    # that: the record also carries "-arch arm64", and passing that as well resets the
+    # target back to the host, which is macOS.
     assemble = [record['arguments'][0]]
-    for flag in ('-target', '-arch'):
-        if flag in record['arguments']:
-            at = record['arguments'].index(flag)
-            assemble += record['arguments'][at:at + 2]
+    if '-target' in record['arguments']:
+        at = record['arguments'].index('-target')
+        assemble += ['-target', record['arguments'][at + 1]]
+    else:
+        assemble += ['-target', 'arm64-apple-ios17.0']
+    if '-isysroot' in record['arguments']:
+        at = record['arguments'].index('-isysroot')
+        assemble += ['-isysroot', record['arguments'][at + 1]]
     assemble += ['-c', str(assembly), '-o', str(destination)]
     result = subprocess.run(assemble, cwd=record['directory'], stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True)
