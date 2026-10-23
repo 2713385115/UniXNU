@@ -30,9 +30,11 @@ Divergence from the upstream build (deliberate)
 """
 import hashlib
 import json
+import os
 import struct
 from pathlib import Path
 import subprocess
+import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).resolve().parent
@@ -40,18 +42,57 @@ OUT = ROOT / 'build/verified-root-bundle'
 RECIPE = ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/bsd/DEVELOPMENT/bsd_init.o.json'
 KIT = ROOT / 'kits/VerifiedRoot'
 
-# Both envelopes and the anchor arrive as one directory: make-owner-policy.py writes
-# it locally, gh-release-upload.py publishes it, and the CI run fetches it here
-# before the kernel is linked. Order fixes the policy table order; NativeUfs picks a
-# policy by matching its signed image size against the window size.
+# Both envelopes and the anchor sit in one directory. make-owner-policy.py writes it
+# next to the image it signed, gh-release-upload.py publishes it as a release, and
+# this script fetches that release when the directory is absent - which is the CI
+# case, where the source tree (and therefore this path) only exists by the time the
+# archives are built. Order fixes the policy table order; NativeUfs picks a policy by
+# matching its signed image size against the window size.
 INPUTS = ROOT / 'build/verified-root-inputs'
 POLICIES = [('OS', INPUTS / 'OS' / 'manifest.bin'), ('SystemOS', INPUTS / 'SystemOS' / 'manifest.bin')]
 ANCHOR = INPUTS / 'trusted-key.bin'
 WINDOWS = {'OS': 6077580800, 'SystemOS': 3303014400}
+# "owner/repository@tag"; set by VERIFIED_ROOT_POLICY_RELEASE, which the CI pre-build
+# step writes into $GITHUB_ENV. Only used to fill a missing INPUTS directory.
+DEFAULT_RELEASE = '2713385115/UniXNU-nx729j@owner-policy-1'
+ASSETS = {'os-manifest.bin': 'OS/manifest.bin',
+          'systemos-manifest.bin': 'SystemOS/manifest.bin',
+          'trusted-key.bin': 'trusted-key.bin'}
 
 
 def fail(message):
     raise SystemExit('build-verified-root-bundle: ' + message)
+
+
+def fetch_policy():
+    """Download the released envelopes into INPUTS, when they are not already there."""
+    spec = os.environ.get('VERIFIED_ROOT_POLICY_RELEASE', DEFAULT_RELEASE)
+    repo, _, tag = spec.partition('@')
+    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
+    if not token:
+        fail('build/verified-root-inputs is empty and GITHUB_TOKEN is unset, so the owner policy '
+             f'at {spec} cannot be downloaded')
+
+    def api(url, accept='application/vnd.github+json'):
+        request = urllib.request.Request(url)
+        request.add_header('Authorization', f'Bearer {token}')
+        request.add_header('Accept', accept)
+        request.add_header('User-Agent', 'unixnu-ci')
+        return urllib.request.urlopen(request, timeout=120)
+
+    release = json.loads(api(f'https://api.github.com/repos/{repo}/releases/tags/{tag}').read())
+    assets = {a['name']: a['id'] for a in release['assets']}
+    for name, relative in ASSETS.items():
+        if name not in assets:
+            fail(f'{spec} has no asset {name}')
+        destination = INPUTS / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with api(f'https://api.github.com/repos/{repo}/releases/assets/{assets[name]}',
+                 'application/octet-stream') as response, destination.open('wb') as out:
+            while chunk := response.read(1 << 20):
+                out.write(chunk)
+        print(f'VerifiedRootBundle: {name} -> {relative} ({destination.stat().st_size} B)')
+
 
 
 def check(destination: Path) -> tuple[bytes, int]:
@@ -71,6 +112,8 @@ def check(destination: Path) -> tuple[bytes, int]:
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    if not ANCHOR.is_file() or not all(path.is_file() for _, path in POLICIES):
+        fetch_policy()
     if not RECIPE.is_file():
         fail(f'missing {RECIPE}; the compile database has not been produced yet')
     record = json.loads(RECIPE.read_text().strip().rstrip(','))
