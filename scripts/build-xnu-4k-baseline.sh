@@ -610,6 +610,18 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
       KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$VERIFIED_STUB_ARCHIVE"
       KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $VERIFIED_STUB_ARCHIVE"
     fi
+    # NativeUfs declares boot_progress_poll weak and calls it from the verified read path. On Darwin a plain
+    # weak declaration is not a weak import, so the reference must still be satisfied. The real definition is
+    # in kits/sheng/BootProgress.c, which only build-boot-progress.py compiles, and only when
+    # XNU_BOOT_PROGRESS=1 (a mode that also requires the Virtio block driver and the owner-root audit). With
+    # progress reporting off, build-boot-progress-stub.py supplies an observer that does nothing.
+    if [ "$BOOT_PROGRESS" != 1 ]; then
+      PROGRESS_STUB_ARCHIVE=$ROOT/build/boot-progress-stub/libBootProgressStub.a
+      if [ -f "$PROGRESS_STUB_ARCHIVE" ]; then
+        KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$PROGRESS_STUB_ARCHIVE"
+        KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $PROGRESS_STUB_ARCHIVE"
+      fi
+    fi
   fi
   if [ "${XNU_NATIVE_ADRENO:-0}" = 1 ]; then
     # NativeAdreno plus its kits (scripts/build-native-adreno-kits.py). No personality is installed: the
