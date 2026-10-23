@@ -159,10 +159,34 @@ if missing:
 archive = OUT / 'libVerifiedRootStub.a'
 archive.unlink(missing_ok=True)
 subprocess.run(['xcrun', 'ar', 'rcs', archive, destination], check=True)
-# The kernel link takes the object, not the archive (see build-xnu-4k-baseline.sh): an object on the link line
-# is always loaded, while -force_load around a conditional left the symbols out without a word. Both are left
-# here because the archive is what the VerifiedRoot kit itself would produce.
+
 print('VerifiedRootStub: refusing policy provider linked as a placeholder '
       '(policy_count=0, no block device can publish)')
 print('VerifiedRootStub: %s exports %d external symbols; %s' %
       (destination, len(found), archive.name))
+
+# Both symbols the kernel link reported missing are referenced by NativeUfs.o, so the surest place for their
+# definitions is the archive that object already lives in: an archive member is pulled to satisfy a reference
+# from a sibling member. Two earlier attempts failed for reasons outside this file -- -Wl,-force_load of the
+# standalone archive, and the bare object path on LD_KERNEL_ARCHIVES -- and the compile record, the object and
+# its symbol table were all verified correct each time, so this stops depending on how the build script's
+# extra link inputs reach the linker at all.
+UFS_ARCHIVE = ROOT / 'build/native-ufs/libNativeUfs.a'
+if not UFS_ARCHIVE.is_file():
+    raise SystemExit('build/native-ufs/libNativeUfs.a not built yet; build-verified-root-stub.py must run '
+                     'after "build-arm-driver.py NativeUfs" in the board archives list')
+subprocess.run(['xcrun', 'ar', 'rs', str(UFS_ARCHIVE), str(destination)], check=True)
+
+# Verify the merged archive, not just the object: that is what the kernel link reads. Only
+# defined symbols count -- an entry of type "U" is this object asking for the name, not providing it.
+global_symbols = subprocess.run(['xcrun', 'nm', '-g', str(UFS_ARCHIVE)],
+                                capture_output=True, text=True, check=True).stdout
+merged = set()
+for line in global_symbols.splitlines():
+    parts = line.split()
+    if len(parts) == 2 and parts[0] != 'U':
+        merged.add(parts[1])
+absent = needed - merged
+if absent:
+    raise SystemExit('libNativeUfs.a still lacks %s' % ', '.join(sorted(absent)))
+print('VerifiedRootStub: merged into libNativeUfs.a; all %d symbols read back as defined' % len(needed))
