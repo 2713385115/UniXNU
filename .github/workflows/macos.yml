@@ -23,6 +23,7 @@ on:
           - kernel payload
           - kernel userdata
           - kernel userdata payload
+          - userdata
         default: kernel userdata
       ipsw_url:
         description: IPSW URL (empty uses board.toml)
