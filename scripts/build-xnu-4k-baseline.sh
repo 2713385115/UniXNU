@@ -587,6 +587,30 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
     KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$UFS_ARCHIVE"
     KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $UFS_ARCHIVE"
   fi
+  # Every built-in block driver derives from IOBlockStorageDevice, which is not part of XNU: it lives in the
+  # IOStorageFamily kext, of which the tree carries only the public headers. Linking a driver without the
+  # compiled class fails on "vtable for IOBlockStorageDevice" plus its out-of-line destructor and
+  # getProperty(). build-io-storage-family.py compiles exactly those sources out of refer/IOStorageFamily, so
+  # this is the real implementation rather than a placeholder.
+  if [ "${XNU_NATIVE_UFS:-0}" = 1 ] || [ "${XNU_NATIVE_RAM_BLOCK:-0}" = 1 ] || \
+     [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" = 1 ]; then
+    STORAGE_FAMILY_ARCHIVE=$ROOT/build/io-storage-family/libIOStorageFamily.a
+    if [ ! -f "$STORAGE_FAMILY_ARCHIVE" ]; then
+      echo "No $STORAGE_FAMILY_ARCHIVE: add build-io-storage-family.py to the board's [kernel] archives." >&2
+      exit 1
+    fi
+    KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$STORAGE_FAMILY_ARCHIVE"
+    KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $STORAGE_FAMILY_ARCHIVE"
+    # The VerifiedRoot kit only produces a real archive after a signature and block audit of the original OS
+    # image. Until that exists this stand-in satisfies the link: policy count 0, every entry refuses, so no
+    # verified block device can ever be published through it. The raw transport is untouched, which is what
+    # the native-ufs-probe stages exercise.
+    VERIFIED_STUB_ARCHIVE=$ROOT/build/verified-root-stub/libVerifiedRootStub.a
+    if [ -f "$VERIFIED_STUB_ARCHIVE" ]; then
+      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$VERIFIED_STUB_ARCHIVE"
+      KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $VERIFIED_STUB_ARCHIVE"
+    fi
+  fi
   if [ "${XNU_NATIVE_ADRENO:-0}" = 1 ]; then
     # NativeAdreno plus its kits (scripts/build-native-adreno-kits.py). No personality is installed: the
     # board probe calls NativeAdrenoGmuContextBringup directly once it has powered the GPU CX domain.
