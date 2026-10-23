@@ -163,23 +163,34 @@ def main() -> int:
             fail(f'{source.name} did not compile:\n' + (result.stdout or '')[-3000:])
         objects.append(destination)
 
+    # The envelopes are NOT embedded in the kernel anymore: the 74 MiB of block
+    # hashes blew the kernel up to 125 MiB and the ABL-loaded boot image stalled
+    # right after the kernel entry (green bar) because the payload no longer fit
+    # the loader's memory budget. The envelopes now live in the `userdata` image,
+    # right after the SystemOS window, and NativeUfs reads them from UFS with
+    # hostRead4k (absolute LBA = userdataFirst + offset/4096) and still authenticates
+    # them against the anchor key below (the 395-byte VROOTKEY is the only trust
+    # anchor that must stay in the kernel). The policy table therefore records each
+    # envelope's byte offset in `userdata` plus its length, instead of an in-kernel
+    # pointer.
+    #
+    # Layout (bytes into the userdata image):
+    #   OS manifest       at 0x22f400000
+    #   SystemOS manifest at 0x22f400000 + align1M(OS manifest bytes)
+    POLICY_BASE = 0x22f400000
+    policy_offset = POLICY_BASE
     assembly = OUT / 'verified-root-policies.S'
-    text = ['// Generated inputs: the two owner-signed envelopes, the anchor and the table that',
-            '// NativeUfs selects from. Never edited by hand.',
+    text = ['// Generated inputs: the two owner-signed envelopes live in `userdata`; only',
+            '// their offsets/sizes and the anchor key are linked into the kernel.',
+            '// Never edited by hand.',
             '.section __DATA_CONST,__const']
-    for name, path, data in envelopes:
-        text += ['.balign 8', f'.globl _verified_root_{name.lower()}_manifest',
-                 f'_verified_root_{name.lower()}_manifest:',
-                 f'.incbin "{path.as_posix()}"',
-                 '.balign 8', f'.globl _verified_root_{name.lower()}_manifest_bytes',
-                 f'_verified_root_{name.lower()}_manifest_bytes:',
-                 f'.quad {len(data)}']
     text += ['.balign 8', '.globl _verified_root_key', '_verified_root_key:',
              f'.incbin "{ANCHOR.as_posix()}"',
              '.balign 8', '.globl _verified_root_policies, _verified_root_policy_count',
              '_verified_root_policies:']
     for name, _, data in envelopes:
-        text.append(f'.quad _verified_root_{name.lower()}_manifest, {len(data)}')
+        text.append(f'.quad {policy_offset}, {len(data)}')
+        policy_offset += (len(data) + (1 << 20) - 1) // (1 << 20) * (1 << 20)
     text += ['_verified_root_policy_count:', f'.quad {len(envelopes)}']
     assembly.write_text('\n'.join(text) + '\n')
 
