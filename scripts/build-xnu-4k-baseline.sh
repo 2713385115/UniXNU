@@ -605,11 +605,16 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
     # image. Until that exists this stand-in satisfies the link: policy count 0, every entry refuses, so no
     # verified block device can ever be published through it. The raw transport is untouched, which is what
     # the native-ufs-probe stages exercise.
-    VERIFIED_STUB_ARCHIVE=$ROOT/build/verified-root-stub/libVerifiedRootStub.a
-    if [ -f "$VERIFIED_STUB_ARCHIVE" ]; then
-      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$VERIFIED_STUB_ARCHIVE"
-      KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $VERIFIED_STUB_ARCHIVE"
+    VERIFIED_STUB_OBJECT=$ROOT/build/verified-root-stub/VerifiedRootStub.o
+    if [ ! -f "$VERIFIED_STUB_OBJECT" ]; then
+      echo "No $VERIFIED_STUB_OBJECT: add build-verified-root-stub.py to the board's [kernel] archives." >&2
+      exit 1
     fi
+    # The object, not the archive. NativeUfs reaches these symbols from another object of the same link, and a
+    # silent -f test around a -force_load left an undefined-symbol link that named the archive's own symbols as
+    # missing: an ordinary object on the link line cannot be skipped that way.
+    KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $VERIFIED_STUB_OBJECT"
+    KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $VERIFIED_STUB_OBJECT"
     # NativeUfs declares boot_progress_poll weak and calls it from the verified read path. On Darwin a plain
     # weak declaration is not a weak import, so the reference must still be satisfied. The real definition is
     # in kits/sheng/BootProgress.c, which only build-boot-progress.py compiles, and only when
