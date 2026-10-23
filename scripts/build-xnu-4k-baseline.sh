@@ -605,16 +605,15 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
       echo "No $STORAGE_FAMILY_ARCHIVE: add build-storage-bindings.py to the board's [kernel] archives." >&2
       exit 1
     fi
-    # nm through a file: with pipefail, "nm | grep -q" reports nm's SIGPIPE as a
-    # failed pipeline as soon as grep matches, which reads as "no match here".
-    BINDINGS_NM=$ROOT/build/io-storage-family/bindings.nm
-    if ! xcrun nm -g --defined-only "$STORAGE_FAMILY_ARCHIVE" > "$BINDINGS_NM" 2>&1; then
-      echo "$STORAGE_FAMILY_ARCHIVE is not readable: $(tail -3 "$BINDINGS_NM")" >&2
-      exit 1
-    fi
-    if ! grep -q 'ZTV20IOBlockStorageDevice' "$BINDINGS_NM"; then
-      echo "$STORAGE_FAMILY_ARCHIVE lacks the IOStorageFamily vtable binding; nm said:" >&2
-      head -5 "$BINDINGS_NM" >&2
+    # Read the binding source, not nm: the check is about what was generated, and
+    # nm's column separator differs between toolchains. With pipefail, "nm |
+    # grep -q" also reports nm's SIGPIPE as a failed pipeline as soon as grep
+    # matches, which reads as "no match here".
+    BINDINGS_SOURCE=$ROOT/build/io-storage-family/original-bindings.S
+    if [ ! -f "$BINDINGS_SOURCE" ] ||
+       ! grep -q '^[.]set __ZTV20IOBlockStorageDevice, ' "$BINDINGS_SOURCE"; then
+      echo "$STORAGE_FAMILY_ARCHIVE was not built from a storage binding source" >&2
+      echo "regenerate it with scripts/build-storage-bindings.py" >&2
       exit 1
     fi
     KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$STORAGE_FAMILY_ARCHIVE"
