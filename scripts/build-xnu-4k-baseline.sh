@@ -602,19 +602,15 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
     KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$STORAGE_FAMILY_ARCHIVE"
     KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $STORAGE_FAMILY_ARCHIVE"
     # The VerifiedRoot kit only produces a real archive after a signature and block audit of the original OS
-    # image. Until that exists this stand-in satisfies the link: policy count 0, every entry refuses, so no
-    # verified block device can ever be published through it. The raw transport is untouched, which is what
-    # the native-ufs-probe stages exercise.
-    VERIFIED_STUB_OBJECT=$ROOT/build/verified-root-stub/VerifiedRootStub.o
-    if [ ! -f "$VERIFIED_STUB_OBJECT" ]; then
-      echo "No $VERIFIED_STUB_OBJECT: add build-verified-root-stub.py to the board's [kernel] archives." >&2
+    # image. Until that exists, build-verified-root-stub.py compiles refusing policies and merges that object
+    # into build/native-ufs/libNativeUfs.a, so nothing extra is needed here: the archive this block already
+    # force-loads carries them. Their definitions sit beside NativeUfs.o, which refers to them.
+    if [ -f "$ROOT/build/verified-root-stub/VerifiedRootStub.o" ] && \
+       ! xcrun nm -g "$UFS_ARCHIVE" 2>/dev/null | grep -q ' _verified_root_key$'; then
+      echo "$UFS_ARCHIVE lacks _verified_root_key: build-verified-root-stub.py must run after" >&2
+      echo "build-arm-driver.py NativeUfs in the board's [kernel] archives." >&2
       exit 1
     fi
-    # The object, not the archive. NativeUfs reaches these symbols from another object of the same link, and a
-    # silent -f test around a -force_load left an undefined-symbol link that named the archive's own symbols as
-    # missing: an ordinary object on the link line cannot be skipped that way.
-    KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $VERIFIED_STUB_OBJECT"
-    KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $VERIFIED_STUB_OBJECT"
     # NativeUfs declares boot_progress_poll weak and calls it from the verified read path. On Darwin a plain
     # weak declaration is not a weak import, so the reference must still be satisfied. The real definition is
     # in kits/sheng/BootProgress.c, which only build-boot-progress.py compiles, and only when
