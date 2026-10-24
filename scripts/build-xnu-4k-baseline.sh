@@ -43,7 +43,12 @@ for LATE_PATCH in "$ROOT/patches/xnu/zzz-boot-progress.patch" "$ROOT/patches/xnu
 done
 for PATCH in "$ROOT"/patches/xnu/*.patch "$ROOT"/kits/NativePrelink/patches/*.patch; do
   if ! git -C .cache/xnu-work apply --reverse --check "$PATCH" >/dev/null 2>&1; then
-    git -C .cache/xnu-work apply --check "$PATCH"
+    if ! git -C .cache/xnu-work apply --check "$PATCH" >/dev/null 2>&1; then
+      echo "DIAG: failed patch = $PATCH" >&2
+      echo "DIAG: pe_init.c around check_for_panic_log:" >&2
+      grep -n -B2 -A20 "check_for_panic_log" .cache/xnu-work/pexpert/arm/pe_init.c >&2 || echo "DIAG: no pe_init.c match" >&2
+      git -C .cache/xnu-work apply --check "$PATCH"
+    fi
     git -C .cache/xnu-work apply "$PATCH"
   fi
 done
