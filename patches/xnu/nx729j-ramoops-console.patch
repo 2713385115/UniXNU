@@ -13,17 +13,18 @@ index 8fe43b6..5b3b464 100644
  extern void     patch_low_glo(void);
  extern int      serial_init(void);
  extern void sleep_token_buffer_init(void);
-@@ -531,6 +535,10 @@ arm_init(
- 
- 	arm_vm_init(xmaxmem, args);
+@@ -534,6 +534,10 @@ arm_init(
+ 	if (debug_boot_arg) {
+ 		patch_low_glo();
+ 	}
  
 +#if defined(XNU_NX729J_RAMOOPS_CONSOLE) && XNU_NX729J_RAMOOPS_CONSOLE
 +	(void)nx729j_ramoops_console_init();
 +#endif
 +
- 	if (debug_boot_arg) {
- 		patch_low_glo();
- 	}
+ #if __arm64__ && WITH_CLASSIC_S2R
+ 	sleep_token_buffer_init();
+ #endif
 diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
 index e6d38d3..6a84f33 100644
 --- a/osfmk/console/serial_console.c
@@ -63,7 +64,7 @@ index e6d38d3..6a84f33 100644
  
 --- /dev/null
 +++ b/osfmk/arm64/nx729j_ramoops_console.h
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,125 @@
 +/* SPDX-License-Identifier: BSD-2-Clause-Patent */
 +/* Minimal persistent console mirror for the RedMagic 8 Pro / 8 Pro+ (nx729j).
 + *
@@ -189,4 +190,3 @@ index e6d38d3..6a84f33 100644
 +	nx729j_ramoops_base = mapped;
 +	return 1;
 +}
-+
