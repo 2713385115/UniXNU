@@ -12,11 +12,10 @@ index f3532cc..127e132 100644
  
  #if (DEVELOPMENT || DEBUG) && defined(XNU_TARGET_OS_BRIDGE)
  /*
-@@ -102,7 +105,19 @@ void PE_slide_devicetree(vm_offset_t);
- static void
- check_for_panic_log(void)
- {
--#if defined(PLATFORM_PANIC_LOG_PADDR) && !(defined(XNU_DT_PANIC_REGION) && XNU_DT_PANIC_REGION)
+@@ -532,6 +532,20 @@ void PE_create_console(void)
+ 	 * Check the head of VRAM for a panic log saved on last panic.
+ 	 * Do this before the VRAM is trashed.
+ 	 */
 +#if defined(XNU_NX729J_VOLATILE_PANIC_LOG) && XNU_NX729J_VOLATILE_PANIC_LOG
 +	/*
 +	 * The nx729j device tree has no Apple PRAM reservation, so the standard
@@ -29,7 +28,8 @@ index f3532cc..127e132 100644
 +	gPanicBase = (vm_offset_t)nx729j_volatile_panic_log;
 +	gPanicSize = sizeof(nx729j_volatile_panic_log);
 +	panic_text_len = gPanicSize - sizeof(struct embedded_panic_header);
-+#elif defined(PLATFORM_PANIC_LOG_PADDR) && !(defined(XNU_DT_PANIC_REGION) && XNU_DT_PANIC_REGION)
- 	gPanicBase = ml_io_map_wcomb(PLATFORM_PANIC_LOG_PADDR, PLATFORM_PANIC_LOG_SIZE);
- 	panic_text_len = PLATFORM_PANIC_LOG_SIZE - sizeof(struct embedded_panic_header);
- 	gPanicSize = PLATFORM_PANIC_LOG_SIZE;
++#else
+ 	check_for_panic_log();
++#endif
+ 
+ 	if (PE_state.video.v_display) {
