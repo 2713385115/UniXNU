@@ -1,5 +1,5 @@
 diff --git a/pexpert/arm/pe_init.c b/pexpert/arm/pe_init.c
-index 433b6cd..9c2f080 100644
+index f3532cc..127e132 100644
 --- a/pexpert/arm/pe_init.c
 +++ b/pexpert/arm/pe_init.c
 @@ -73,6 +73,9 @@ clock_frequency_info_t gPEClockFrequencyInfo;
@@ -16,7 +16,7 @@ index 433b6cd..9c2f080 100644
  static void
  check_for_panic_log(void)
  {
--#ifdef PLATFORM_PANIC_LOG_PADDR
+-#if defined(PLATFORM_PANIC_LOG_PADDR) && !(defined(XNU_DT_PANIC_REGION) && XNU_DT_PANIC_REGION)
 +#if defined(XNU_NX729J_VOLATILE_PANIC_LOG) && XNU_NX729J_VOLATILE_PANIC_LOG
 +	/*
 +	 * The nx729j device tree has no Apple PRAM reservation, so the standard
@@ -29,7 +29,7 @@ index 433b6cd..9c2f080 100644
 +	gPanicBase = (vm_offset_t)nx729j_volatile_panic_log;
 +	gPanicSize = sizeof(nx729j_volatile_panic_log);
 +	panic_text_len = gPanicSize - sizeof(struct embedded_panic_header);
-+#elif defined(PLATFORM_PANIC_LOG_PADDR)
++#elif defined(PLATFORM_PANIC_LOG_PADDR) && !(defined(XNU_DT_PANIC_REGION) && XNU_DT_PANIC_REGION)
  	gPanicBase = ml_io_map_wcomb(PLATFORM_PANIC_LOG_PADDR, PLATFORM_PANIC_LOG_SIZE);
  	panic_text_len = PLATFORM_PANIC_LOG_SIZE - sizeof(struct embedded_panic_header);
  	gPanicSize = PLATFORM_PANIC_LOG_SIZE;
