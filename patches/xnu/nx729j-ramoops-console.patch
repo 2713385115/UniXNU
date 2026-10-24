@@ -13,7 +13,7 @@ index 8fe43b6..5b3b464 100644
  extern void     patch_low_glo(void);
  extern int      serial_init(void);
  extern void sleep_token_buffer_init(void);
-@@ -521,6 +525,10 @@ arm_init(
+@@ -531,6 +535,10 @@ arm_init(
  
  	arm_vm_init(xmaxmem, args);
  
