@@ -634,8 +634,9 @@ if [ "${XNU_SOURCE_CORECRYPTO14:-0}" = 1 ] && [ "$BOOTSTRAP" = 0 ]; then
     # for the owner-signed envelopes, build-verified-root-stub.py for the refusing stand-ins used before
     # any envelope existed. Either way the symbols must read back as defined from the merged archive,
     # which is what the kernel link actually loads.
-    if [ -f "$ROOT/build/verified-root-stub/VerifiedRootStub.o" ] || \
-       [ -f "$ROOT/build/verified-root-bundle/verified_root.o" ]; then
+    if [ "${XNU_NATIVE_UFS:-0}" = 1 ] && \
+       { [ -f "$ROOT/build/verified-root-stub/VerifiedRootStub.o" ] || \
+         [ -f "$ROOT/build/verified-root-bundle/verified_root.o" ]; }; then
       UFS_NM=$ROOT/build/native-ufs/native-ufs.nm
       xcrun nm -g "$UFS_ARCHIVE" > "$UFS_NM" 2>/dev/null || true
       if ! grep -qE '^[0-9a-f]+ [A-Za-z] _verified_root_key$' "$UFS_NM"; then
