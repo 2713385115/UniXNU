@@ -758,6 +758,17 @@ PY_BINDINGS
       KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES $RAM_BLOCK_OBJECT"
     else
       KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$RAM_BLOCK_ARCHIVE"
+      # Without NativeUfs there is no persistent-overlay store behind the RAM
+      # transport, but every native_ufs_store_* is a weak_import that Darwin still
+      # requires a definition for. Bind them to a stub whose mode() reports 0, so
+      # attachStore() skips the overlay and the seed stays the only backing store.
+      if [ "${XNU_NATIVE_UFS:-0}" != 1 ]; then
+        STORE_STUB_ARCHIVE=$ROOT/build/storage-store-stub/libStorageStoreStub.a
+        if [ -f "$STORE_STUB_ARCHIVE" ]; then
+          KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$STORE_STUB_ARCHIVE"
+          KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $STORE_STUB_ARCHIVE"
+        fi
+      fi
     fi
     KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $RAM_BLOCK_ARCHIVE"
   fi
