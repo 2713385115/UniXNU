@@ -1,0 +1,68 @@
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+index 985370e..f544935 100644
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -2017,6 +2017,9 @@ arm_vm_init(uint64_t memory_size, boot_args * args)
+ 	segLINKB         = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__LINKEDIT", &segSizeLINK);
+ 	segKLDB          = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__KLD", &segSizeKLD);
+ 	segKLDDATAB      = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__KLDDATA", &segSizeKLDDATA);
++	printf("nx729j kld: __KLD %#lx+%#lx __KLDDATA %#lx+%#lx\n",
++	    (unsigned long)segKLDB, (unsigned long)segSizeKLD,
++	    (unsigned long)segKLDDATAB, (unsigned long)segSizeKLDDATA);
+ 	segPRELINKDATAB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PRELINK_DATA", &segSizePRELINKDATA);
+ 	segPRELINKINFOB  = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PRELINK_INFO", &segSizePRELINKINFO);
+ 	segPLKLLVMCOVB   = (vm_offset_t) getsegdatafromheader(&_mh_execute_header, "__PLK_LLVM_COV", &segSizePLKLLVMCOV);
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index ff5296d..f0cb404 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1737,6 +1737,25 @@ handle_kernel_abort_recover(
+ #endif
+ }
+ 
++/*
++ * The static-region panic below prints only pc/lr, which is not enough to tell a
++ * stale pointer from a missing mapping.  Report the fault address and the status
++ * word first so a photograph of the screen identifies the access exactly.
++ */
++static void
++nx729j_report_static_fault(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_addr,
++    fault_status_t fault_code, vm_prot_t fault_type)
++{
++	kprintf("nx729j fault: far=%#lx esr=%#x fsc=%d prot=%d\n",
++	    (unsigned long)fault_addr, esr, (int)fault_code, (int)fault_type);
++	kprintf("nx729j fault: pc=%#lx lr=%#lx sp=%#lx\n",
++	    (unsigned long)saved_state64(state)->pc,
++	    (unsigned long)saved_state64(state)->lr,
++	    (unsigned long)saved_state64(state)->sp);
++	kprintf("nx729j fault: vbase=%#lx send=%#lx\n",
++	    (unsigned long)gVirtBase, (unsigned long)static_memory_end);
++}
++
+ static void
+ handle_kernel_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_addr,
+     fault_status_t fault_code, vm_prot_t fault_type, expected_fault_handler_t expected_fault_handler)
+@@ -1788,6 +1807,7 @@ handle_kernel_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_ad
+ #endif /* CONFIG_XNUPOST */
+ 
+ 		if (fault_addr >= gVirtBase && fault_addr < static_memory_end) {
++			nx729j_report_static_fault(state, esr, fault_addr, fault_code, fault_type);
+ 			panic_with_thread_kernel_state("Unexpected fault in kernel static region\n", state);
+ 		}
+ 
+@@ -1825,6 +1845,7 @@ handle_kernel_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_ad
+ 		}
+ 
+ 		if (fault_addr >= gVirtBase && fault_addr < static_memory_end) {
++			nx729j_report_static_fault(state, esr, fault_addr, fault_code, fault_type);
+ 			panic_with_thread_kernel_state("Unexpected fault in kernel static region\n", state);
+ 		}
+ 
+@@ -1878,6 +1899,7 @@ handle_kernel_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_ad
+ 		kprintf("Unclassified kernel abort (fault_code=0x%x)\n", fault_code);
+ 	}
+ 
++	nx729j_report_static_fault(state, esr, fault_addr, fault_code, fault_type);
+ 	panic_with_thread_kernel_state("Kernel data abort.", state);
+ }
+ 
