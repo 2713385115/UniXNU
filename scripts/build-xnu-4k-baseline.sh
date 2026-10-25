@@ -268,7 +268,16 @@ if [ "$OWNER_ROOT_TRUST" != 0 ] && [ "$OWNER_ROOT_TRUST" != 1 ]; then
   echo 'XNU_OWNER_ROOT_TRUST must be 0 or 1' >&2
   exit 1
 fi
-if [ "$OWNER_ROOT_TRUST" = 1 ] && { [ "$OWNER_ROOT_AUDIT" != 1 ] || [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" != 1 ]; }; then
+# The mounted media is whichever driver publishes a verified block device on this
+# board: NativeVirtioBlock on sheng, NativeUfs on nx729j. Both go through
+# NativeUfsBlock/NativeVirtioBlock configureVerification() against the same
+# owner-signed envelopes when VERIFIED_ROOT_PROBE is on, and both refuse every
+# window they cannot authenticate. Requiring the virtio driver by name made the UFS
+# board unable to enable owner root acceptance at all, and without it bsd_init
+# panics with "rootvp not authenticated after mounting" the moment a non-Apple root
+# fails FSIOC_KERNEL_ROOTAUTH - i.e. the board could never reach launchd.
+if [ "$OWNER_ROOT_TRUST" = 1 ] && { [ "$OWNER_ROOT_AUDIT" != 1 ] || \
+     { [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" != 1 ] && [ "${XNU_NATIVE_UFS:-0}" != 1 ]; }; }; then
   echo 'Owner root acceptance requires actual mounted-media binding and verified block storage' >&2
   exit 1
 fi
