@@ -792,8 +792,22 @@ PY_BINDINGS
   if [ "$OWNER_ROOT_PROBE" = 1 ]; then
     VERIFIED_ROOT_ARCHIVE=${XNU_VERIFIED_ROOT_ARCHIVE:-$ROOT/build/verified-root-xnu/libVerifiedRootProbe.a}
     test -f "$VERIFIED_ROOT_ARCHIVE"
-    KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$VERIFIED_ROOT_ARCHIVE"
-    KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $VERIFIED_ROOT_ARCHIVE"
+    # build-verified-root-bundle.py merges its objects into libNativeUfs.a, which this
+    # link already force-loads. Force-loading the bundle as well then reports
+    #   duplicate symbol '_vr_open' / '_vr_verify_block' / '_verified_root_key' /
+    #   '_verified_root_policies' / '_verified_root_policy_count' / '_vr_xnu_crypto'
+    # in libNativeUfs.a[x] and libVerifiedRootBundle.a[y].
+    # A bundle that is already inside the UFS archive must not be linked twice; a
+    # bundle that stands on its own (the virtio boards) still has to be. The same
+    # _verified_root_key probe the archive check above uses decides which case this is.
+    if [ "${XNU_NATIVE_UFS:-0}" = 1 ] && [ -f "$ROOT/build/native-ufs/libNativeUfs.a" ] && \
+       xcrun nm -g "$ROOT/build/native-ufs/libNativeUfs.a" 2>/dev/null | \
+       grep -qE '^[0-9a-f]+ [A-Za-z] _verified_root_key$'; then
+      echo "verified-root bundle already merged into libNativeUfs.a; not force-loading $VERIFIED_ROOT_ARCHIVE again" >&2
+    else
+      KERNEL_EXTRA_ARCHIVES="$KERNEL_EXTRA_ARCHIVES -Wl,-force_load,$VERIFIED_ROOT_ARCHIVE"
+      KERNEL_ARCHIVE_DEPENDENCIES="$KERNEL_ARCHIVE_DEPENDENCIES $VERIFIED_ROOT_ARCHIVE"
+    fi
   fi
   if [ "$MOCKFS_MODE" = 1 ]; then
     MOCKFS_ARCHIVE=$ROOT/build/mockfs-fixture/libmockfs_fixture.a
