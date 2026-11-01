@@ -1,0 +1,195 @@
+diff --git a/libkern/c++/OSKext.cpp b/libkern/c++/OSKext.cpp
+--- a/libkern/c++/OSKext.cpp
++++ b/libkern/c++/OSKext.cpp
+@@ -300,6 +300,21 @@ static  bool                sKeepSymbols               = false;
+ static  bool                sPanicOnKCMismatch         = false;
+ static  bool                sOSKextWasResetAfterUserspaceReboot = false;
+ 
++/* nx729j: PRELINK REGISTRATION PROBE.
++ * addKextsFromKextCollection() throws away the OSSharedPtr returned by
++ * withPrelinkedInfoDict(), so a collection in which every single kext fails
++ * still reports success. These counters and the stage reached by the first
++ * failure are read by libsa/bootstrap.cpp, which panics with them after KLD.
++ * The identifier is copied, never referenced: the dictionary that owns it is
++ * released when readPrelinkedExtensions returns. */
++extern "C" {
++uint32_t g_nx729j_prelink_ok;
++uint32_t g_nx729j_prelink_bad;
++uint32_t g_nx729j_prelink_stage;
++uint32_t g_nx729j_fail_stage;
++char     g_nx729j_fail_id[96];
++}
++
+ /*********************************************************************
+  * sKextLock is the principal lock for OSKext, and guards all static
+  * and global variables not owned by other locks (declared further
+@@ -2034,6 +2049,7 @@ OSKext::initWithPrelinkedInfoDict(
+ 	bool doCoalescedSlides,
+ 	kc_kind_t type)
+ {
++	g_nx729j_prelink_stage = 1;   /* entered */
+ 	bool            result              = false;
+ 	OSString      * kextPath            = NULL;                // do not release
+ 	OSNumber      * addressNum          = NULL;                // reused; do not release
+@@ -2063,6 +2079,7 @@ OSKext::initWithPrelinkedInfoDict(
+ #if KASLR_KEXT_DEBUG
+ 	IOLog("kaslr: doCoalescedSlides %d kext %s \n", doCoalescedSlides, getIdentifierCString());
+ #endif
++	g_nx729j_prelink_stage = 2;   /* setInfoDictionaryAndPath ok */
+ 
+ 	/* Also get the executable's bundle-relative path if present.
+ 	 * Don't look for an arch-specific path property.
+@@ -2083,6 +2100,7 @@ OSKext::initWithPrelinkedInfoDict(
+ 		flags.requireExplicitLoad = 1;
+ 	}
+ 
++	g_nx729j_prelink_stage = 3;   /* executable load address / size */
+ 	/* Create an OSData wrapper around the linked executable.
+ 	 */
+ 	addressNum = OSDynamicCast(OSNumber,
+@@ -2115,6 +2133,7 @@ OSKext::initWithPrelinkedInfoDict(
+ 		/* If the kext's load address differs from its source address, allocate
+ 		 * space in the kext map at the load address and copy the kext over.
+ 		 */
++		g_nx729j_prelink_stage = 4;   /* source address / kext_alloc */
+ 		addressNum = OSDynamicCast(OSNumber, anInfoDict->getObject(kPrelinkExecutableSourceKey));
+ 		if (addressNum) {
+ 			srcData = (void *) (((uintptr_t) (addressNum->unsigned64BitValue())) + kext_slide);
+@@ -2151,6 +2170,7 @@ OSKext::initWithPrelinkedInfoDict(
+ 			anInfoDict->removeObject(kPrelinkExecutableSourceKey);
+ 		}
+ 
++		g_nx729j_prelink_stage = 5;   /* executable wrapper */
+ 		prelinkedExecutable = OSData::withBytesNoCopy(data, length);
+ 		if (!prelinkedExecutable) {
+ 			OSKextLog(this,
+@@ -2177,6 +2197,7 @@ OSKext::initWithPrelinkedInfoDict(
+ #endif
+ 		}
+ 		setLinkedExecutable(prelinkedExecutable.get());
++		g_nx729j_prelink_stage = 6;   /* kmod_info */
+ 		addressNum = OSDynamicCast(OSNumber,
+ 		    anInfoDict->getObject(kPrelinkKmodInfoKey));
+ 		if (!addressNum) {
+@@ -2235,6 +2256,7 @@ OSKext::initWithPrelinkedInfoDict(
+ 		}
+ 	}
+ 
++	g_nx729j_prelink_stage = 7;   /* slidePrelinkedExecutable */
+ 	result = (kOSReturnSuccess == slidePrelinkedExecutable(doCoalescedSlides));
+ 	if (!result) {
+ 		goto finish;
+@@ -2323,8 +2345,13 @@ OSKext::initWithPrelinkedInfoDict(
+ 	 */
+ 	sPrelinkBoot = true;
+ 
++	g_nx729j_prelink_stage = 8;   /* segments / setVMAttributes / registerIdentifier */
+ 	result = (registerIdentifier() == kOSKextInitialized);
+ finish:
++	/* Reached through every failure path: keep the first one, it names the gate. */
++	if (!result && g_nx729j_fail_stage == 0) {
++		g_nx729j_fail_stage = g_nx729j_prelink_stage;
++	}
+ 	return result;
+ }
+ 
+@@ -10918,7 +10945,26 @@ OSKext::addKextsFromKextCollection(kernel_mach_header_t *mh,
+ 		 * explicitly removed.  Any creation/registration failures are
+ 		 * already logged for us.
+ 		 */
+-		withPrelinkedInfoDict(kextDict, (kaslrOffsets ? TRUE : FALSE), type);
++		OSSharedPtr<OSKext> probeKext =
++		    withPrelinkedInfoDict(kextDict, (kaslrOffsets ? TRUE : FALSE), type);
++		if (probeKext.get() != NULL) {
++			g_nx729j_prelink_ok++;
++		} else {
++			g_nx729j_prelink_bad++;
++			if (g_nx729j_fail_id[0] == '\0') {
++				OSString * failID = OSDynamicCast(OSString,
++				    kextDict->getObject(kCFBundleIdentifierKey));
++				if (failID && failID->getCStringNoCopy()) {
++					const char * failName = failID->getCStringNoCopy();
++					uint32_t     copyIndex = 0;
++					while (copyIndex + 1 < sizeof(g_nx729j_fail_id) && failName[copyIndex]) {
++						g_nx729j_fail_id[copyIndex] = failName[copyIndex];
++						copyIndex++;
++					}
++					g_nx729j_fail_id[copyIndex] = '\0';
++				}
++			}
++		}
+ 	}
+ 
+ 	/*
+diff --git a/libsa/bootstrap.cpp b/libsa/bootstrap.cpp
+--- a/libsa/bootstrap.cpp
++++ b/libsa/bootstrap.cpp
+@@ -43,6 +43,18 @@ extern "C" {
+ #include <IOKit/IODeviceTreeSupport.h>
+ #include <IOKit/IOCatalogue.h>
+ 
++/* nx729j: record how far the prelink kext collection got. The failure log
++ * scrolls off the framebuffer long before mountroot, so the numbers are kept
++ * here and printed once, right before the panic in readStartupExtensions(). */
++static uint32_t nx729j_prelink_probe[5];
++extern "C" {
++extern uint32_t g_nx729j_prelink_ok;
++extern uint32_t g_nx729j_prelink_bad;
++extern uint32_t g_nx729j_prelink_stage;
++extern uint32_t g_nx729j_fail_stage;
++extern char     g_nx729j_fail_id[];
++}
++
+ #if __x86_64__
+ #define KASLR_KEXT_DEBUG 0
+ #endif
+@@ -219,6 +231,22 @@ KLDBootstrap::readStartupExtensions(void)
+ 	readBuiltinPersonalities();
+ 	OSKext::sendAllKextPersonalitiesToCatalog(true);
+ 
++	/* One line, on the last screen, after KLD has finished: the console scrolls
++	 * the interesting part away long before the root mount fails.
++	 *   sz=  __PRELINK_INFO section size (0 means the section was not found)
++	 *   xml= OSUnserializeXML succeeded   dic= result was a dictionary
++	 *   ent= _PrelinkInfoDictionary count add= addKextsFromKextCollection()
++	 *   ok=  withPrelinkedInfoDict succeeded   bad= it returned NULL
++	 *   st=  last stage reached by the most recent kext   fst= stage of the
++	 *        first failure (0 means nothing failed)   id= that kext */
++	panic("NATIVE_KLD sz=%x xml=%u dic=%u ent=%u add=%u ok=%u bad=%u st=%u fst=%u id=%s",
++	    (unsigned)nx729j_prelink_probe[0], (unsigned)nx729j_prelink_probe[1],
++	    (unsigned)nx729j_prelink_probe[2], (unsigned)nx729j_prelink_probe[3],
++	    (unsigned)nx729j_prelink_probe[4],
++	    (unsigned)g_nx729j_prelink_ok, (unsigned)g_nx729j_prelink_bad,
++	    (unsigned)g_nx729j_prelink_stage, (unsigned)g_nx729j_fail_stage,
++	    g_nx729j_fail_id[0] ? g_nx729j_fail_id : "(none)");
++
+ 	return;
+ }
+ 
+@@ -246,10 +274,18 @@ KLDBootstrap::readPrelinkedExtensions(kernel_mach_header_t *mh, kc_kind_t type)
+ 	 * then iterate over each kext.
+ 	 */
+ 	infoPlistSection = getsectbynamefromheader(mh, kPrelinkInfoSegment, kPrelinkInfoSection);
++	nx729j_prelink_probe[0] = infoPlistSection ? (uint32_t)infoPlistSection->size : 0;
+ 	parsedXML = OSUnserializeXML((const char *)infoPlistSection->addr, errorString);
++	nx729j_prelink_probe[1] = parsedXML ? 1 : 0;
+ 	if (parsedXML) {
+ 		infoDict = OSDynamicCast(OSDictionary, parsedXML.get());
+ 	}
++	nx729j_prelink_probe[2] = infoDict ? 1 : 0;
++	if (infoDict) {
++		OSArray * probeArray = OSDynamicCast(OSArray,
++		    infoDict->getObject(kPrelinkInfoDictionaryKey));
++		nx729j_prelink_probe[3] = probeArray ? (uint32_t)probeArray->getCount() : 0;
++	}
+ 
+ 	if (!infoDict) {
+ 		const char *errorCString = "(unknown error)";
+@@ -290,6 +326,7 @@ KLDBootstrap::readPrelinkedExtensions(kernel_mach_header_t *mh, kc_kind_t type)
+ 	 */
+ 	ret = OSKext::addKextsFromKextCollection(mh, infoDict,
+ 	    kPrelinkTextSegment, loaded_kcUUID, (mh->filetype == MH_FILESET) ? type : KCKindUnknown);
++	nx729j_prelink_probe[4] = ret ? 1 : 0;
+ 
+ 	if (!ret) {
+ 		OSKextLog(/* kext */ NULL, kOSKextLogErrorLevel | kOSKextLogArchiveFlag,
