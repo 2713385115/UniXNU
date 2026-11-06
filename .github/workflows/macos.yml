@@ -197,8 +197,11 @@ jobs:
           # The panic screen and the frame-buffer console are compiled from scripts/xnu-*.c,
           # so they need clang and ld.lld. Xcode ships clang but not lld, and the scripts read
           # the Mach-O symbol table with llvm-nm, so put the whole Homebrew LLVM set on PATH.
-          brew list llvm >/dev/null 2>&1 || brew install llvm
+          brew install llvm
           export PATH="$(brew --prefix llvm)/bin:$PATH"
+          for t in clang ld.lld llvm-objcopy llvm-nm llvm-size llvm-readelf; do
+            command -v "$t" >/dev/null || { echo "missing $t"; exit 1; }
+          done
           tree="$(ls -d out/*/tree | head -1)"
           kernel="$(ls out/*/kernel/kernel.macho | head -1)"
           echo "tree=$tree"
