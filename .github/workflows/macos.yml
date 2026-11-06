@@ -213,6 +213,15 @@ jobs:
           kernel="$(ls out/*/kernel/kernel.macho | head -1)"
           echo "tree=$tree"
           echo "kernel=$kernel"
+          # The device tree in out/ is not a full checkout of the device repository, so the
+          # two files the screens compile against are fetched when they are not already there.
+          raw="https://raw.githubusercontent.com/2713385115/UniXNU-nx729j/ufs-log"
+          font_dir="$tree/uefi-sheng/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib"
+          mkdir -p "$tree/scripts" "$font_dir"
+          [ -s "$font_dir/Font.h" ] || curl -fsSL -o "$font_dir/Font.h" "$raw/uefi-sheng/Silicon/Silicium/SiliciumPkg/Library/FrameBufferSerialPortLib/Font.h"
+          [ -s "$tree/scripts/xnu-console-screen.c" ] || curl -fsSL -o "$tree/scripts/xnu-console-screen.c" "$raw/scripts/xnu-console-screen.c"
+          [ -s "$tree/scripts/patch-xnu-console-screen.py" ] || curl -fsSL -o "$tree/scripts/patch-xnu-console-screen.py" "$raw/scripts/patch-xnu-console-screen.py"
+          ls -l "$font_dir/Font.h" "$tree/scripts/xnu-console-screen.c" "$tree/scripts/patch-xnu-console-screen.py"
           python3 "$tree/scripts/patch-xnu-entry-probe.py" "$kernel" --panic-screen --no-reset
           python3 "$tree/scripts/patch-xnu-console-screen.py" "$kernel"
 
