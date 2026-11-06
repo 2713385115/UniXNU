@@ -20,6 +20,7 @@ on:
         type: choice
         options:
           - kernel
+          - kernel xnu-screen
           - kernel payload
           - kernel userdata
           - kernel userdata payload
