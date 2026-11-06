@@ -189,6 +189,22 @@ jobs:
           if [ -n "$IPSW_URL" ]; then args+=(--ipsw "$IPSW_URL"); fi
           ./unixnu build kernel "${args[@]}"
 
+      - name: Patch the boot screens into the kernel
+        if: contains(inputs.steps, 'xnu-screen')
+        run: |
+          set -euo pipefail
+          # The panic screen and the frame-buffer console are compiled from scripts/xnu-*.c,
+          # so they need clang and ld.lld. Xcode ships clang but not lld, and the scripts read
+          # the Mach-O symbol table with llvm-nm, so put the whole Homebrew LLVM set on PATH.
+          brew list llvm >/dev/null 2>&1 || brew install llvm
+          export PATH="$(brew --prefix llvm)/bin:$PATH"
+          tree="$(ls -d out/*/tree | head -1)"
+          kernel="$(ls out/*/kernel/kernel.macho | head -1)"
+          echo "tree=$tree"
+          echo "kernel=$kernel"
+          python3 "$tree/scripts/patch-xnu-entry-probe.py" "$kernel" --panic-screen --no-reset
+          python3 "$tree/scripts/patch-xnu-console-screen.py" "$kernel"
+
       - name: Kernel diagnostics
         if: failure()
         run: |
