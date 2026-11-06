@@ -198,7 +198,14 @@ jobs:
           # so they need clang and ld.lld. Xcode ships clang but not lld, and the scripts read
           # the Mach-O symbol table with llvm-nm, so put the whole Homebrew LLVM set on PATH.
           brew install llvm
-          export PATH="$(brew --prefix llvm)/bin:$PATH"
+          brew install lld || true
+          llvm_bin="$(brew --prefix llvm)/bin"
+          lld_bin="$(brew --prefix lld 2>/dev/null || echo /nonexistent)/bin"
+          export PATH="$llvm_bin:$lld_bin:$PATH"
+          echo "--- llvm bin ---"
+          ls "$llvm_bin" | head -40 || true
+          echo "--- lld bin ---"
+          ls "$lld_bin" 2>/dev/null | head -20 || true
           for t in clang ld.lld llvm-objcopy llvm-nm llvm-size llvm-readelf; do
             command -v "$t" >/dev/null || { echo "missing $t"; exit 1; }
           done
