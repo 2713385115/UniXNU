@@ -1,6 +1,6 @@
 --- a/bsd/kern/bsd_init.c
 +++ b/bsd/kern/bsd_init.c
-@@ -987,9 +987,41 @@
+@@ -1052,9 +1052,41 @@
  		if (require_rootauth) {
  			/* enforce sealedness */
  			int autherr = VNOP_IOCTL(rootvnode, FSIOC_KERNEL_ROOTAUTH, NULL, 0, vfs_context_kernel());
@@ -43,7 +43,7 @@
  		}
  	}
  
-@@ -1114,6 +1146,32 @@
+@@ -1179,6 +1211,32 @@
  
  	bsd_init_kprintf("done\n");
  }
