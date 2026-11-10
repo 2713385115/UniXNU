@@ -292,6 +292,26 @@ jobs:
           if [ "$SKIP_SETUP" = "true" ]; then args+=(--skip-setup); fi
           ./unixnu build payload "${args[@]}"
 
+      - name: nx729j Data mount diagnostics
+        if: always()
+        run: |
+          set +e
+          TS=out/nx729j/tree/scripts/build-xnu-4k-baseline.sh
+          echo "== tree script pin count:"
+          grep -c 'DXNU_NATIVE_RAM_BLOCK=1 -DXNU_OWNER_CRYPTEX_FILES' "$TS" || true
+          echo "== tree script diagnostics echo present:"
+          grep -c 'owner-data-volume.h =>' "$TS" || true
+          echo "== owner-data-volume.h:"
+          cat out/nx729j/tree/build/xnu/owner-data-volume.h 2>/dev/null || echo MISSING
+          python3 - <<'PY'
+          import os, glob
+          uuid = os.environ.get('XNU_OWNER_DATA_VOLUME_UUID','')
+          print('seed uuid:', uuid)
+          for k in glob.glob('out/*/kernel/kernel.macho'):
+              data = open(k,'rb').read()
+              print(k, 'size', len(data), 'uuid-in-kernel:', uuid.encode() in data if uuid else 'n/a')
+          PY
+
       - name: Upload kernel and payload
         uses: actions/upload-artifact@v4
         with:
