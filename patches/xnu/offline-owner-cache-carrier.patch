@@ -1,8 +1,8 @@
 diff --git a/bsd/vm/vm_unix.c b/bsd/vm/vm_unix.c
-index 8696353..c53f667 100644
+index 8696353..69960a7 100644
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
-@@ -2225,6 +2225,153 @@ static void shared_region_map_and_slide_cleanup(
+@@ -2225,6 +2225,115 @@ static void shared_region_map_and_slide_cleanup(
  	struct _sr_file_mappings *sr_file_mappings,
  	struct vm_shared_region  *shared_region);
  
@@ -114,49 +114,11 @@ index 8696353..c53f667 100644
 +	return authorized;
 +}
 +#endif
-+	const char *directory = "/private/preboot/System/Library/Caches/com.apple.dyld";
-+	vnode_t expected_parent = NULLVP, device_vnode;
-+	dev_t root_device = NODEV, cache_device = NODEV, expected = NODEV;
-+	char device_path[64];
-+	boolean_t authorized = FALSE;
-+	if (process_root != rootvnode || !file || vnode_vtype(file) != VREG) goto out;
-+	mount_t root_mount = vnode_mount(process_root), cache_mount = vnode_mount(file);
-+	if (!root_mount || !cache_mount || root_mount == cache_mount ||
-+	    !(vfs_flags(root_mount) & MNT_RDONLY) || !(vfs_flags(cache_mount) & MNT_RDONLY) ||
-+	    strcmp(vfs_statfs(root_mount)->f_fstypename, "apfs") ||
-+	    strcmp(vfs_statfs(cache_mount)->f_fstypename, "apfs")) goto out;
-+	device_vnode = vfs_devvp(root_mount);
-+	if (device_vnode) {
-+		root_device = vnode_specrdev(device_vnode);
-+		vnode_put(device_vnode);
-+	}
-+	device_vnode = vfs_devvp(cache_mount);
-+	if (device_vnode) {
-+		cache_device = vnode_specrdev(device_vnode);
-+		vnode_put(device_vnode);
-+	}
-+	if (root_device == NODEV || cache_device == NODEV ||
-+	    !native_verified_block_volume_device(root_uuid, &expected, device_path, sizeof(device_path)) ||
-+	    expected != root_device ||
-+	    !native_verified_block_volume_device(cache_uuid, &expected, device_path, sizeof(device_path)) ||
-+	    expected != cache_device) goto out;
-+	if (vnode_lookup(directory, 0, &expected_parent, vfs_context_current())) goto out;
-+	authorized = vnode_vtype(expected_parent) == VDIR && vnode_mount(expected_parent) == cache_mount &&
-+	    vnode_parent(file) == expected_parent && native_verified_block_root_authorized(root_device);
-+out:
-+	if (expected_parent) vnode_put(expected_parent);
-+	native_owner_cache_carrier_root_device = root_device;
-+	native_owner_cache_carrier_file_device = cache_device;
-+	if (authorized) os_atomic_inc(&native_owner_cache_carrier_accepts, relaxed);
-+	else os_atomic_inc(&native_owner_cache_carrier_rejects, relaxed);
-+	return authorized;
-+}
-+#endif
 +
  /*
   * Setup part of _shared_region_map_and_slide().
   * It had to be broken out of _shared_region_map_and_slide() to
-@@ -2259,6 +2406,8 @@ shared_region_map_and_slide_setup(
+@@ -2259,6 +2368,8 @@ shared_region_map_and_slide_setup(
  		(void *)VM_KERNEL_ADDRPERM(current_thread()),
  		proc_getpid(p), p->p_comm));
  
@@ -165,7 +127,7 @@ index 8696353..c53f667 100644
  	if (files_count > _SR_FILE_MAPPINGS_MAX_FILES) {
  		error = E2BIG;
  		goto done;
-@@ -2290,6 +2439,8 @@ shared_region_map_and_slide_setup(
+@@ -2290,6 +2401,8 @@ shared_region_map_and_slide_setup(
  	/* get the process's shared region (setup in vm_map_exec()) */
  	shared_region = vm_shared_region_trim_and_get(current_task());
  	*shared_region_ptr = shared_region;
@@ -174,7 +136,7 @@ index 8696353..c53f667 100644
  	if (shared_region == NULL) {
  		SHARED_REGION_TRACE_ERROR(
  			("shared_region: %p [%d(%s)] map(): "
-@@ -2417,9 +2568,13 @@ shared_region_map_and_slide_setup(
+@@ -2417,9 +2530,13 @@ shared_region_map_and_slide_setup(
  		 *       of the shared cache */
  		error = mac_file_check_mmap(vfs_context_ucred(vfs_context_current()),
  		    srfmp->fp->fp_glob, VM_PROT_ALL, MAP_FILE | MAP_PRIVATE | MAP_FIXED, 0, &maxprot);
@@ -188,7 +150,7 @@ index 8696353..c53f667 100644
  #endif /* MAC */
  
  #if XNU_TARGET_OS_OSX && defined(__arm64__)
-@@ -2499,6 +2654,7 @@ root_check:
+@@ -2499,6 +2616,7 @@ root_check:
  				error));
  			goto done;
  		}
@@ -196,7 +158,7 @@ index 8696353..c53f667 100644
  		if (va.va_uid != 0) {
  			SHARED_REGION_TRACE_ERROR(
  				("shared_region: %p [%d(%s)] map(%p:'%s'): "
-@@ -2557,7 +2713,18 @@ after_root_check:
+@@ -2557,7 +2675,18 @@ after_root_check:
  		 * is either on the root volume or in the preboot cryptex volume.
  		 */
  		assert(rdir_vp != NULL);
@@ -215,7 +177,7 @@ index 8696353..c53f667 100644
  			vnode_t preboot_vp = NULL;
  #if XNU_TARGET_OS_OSX
  #define PREBOOT_CRYPTEX_PATH "/System/Volumes/Preboot/Cryptexes"
-@@ -2565,7 +2732,11 @@ after_root_check:
+@@ -2565,7 +2694,11 @@ after_root_check:
  #define PREBOOT_CRYPTEX_PATH "/private/preboot/Cryptexes"
  #endif
  			error = vnode_lookup(PREBOOT_CRYPTEX_PATH, 0, &preboot_vp, vfs_context_current());
@@ -228,7 +190,7 @@ index 8696353..c53f667 100644
  				SHARED_REGION_TRACE_ERROR(
  					("shared_region: %p [%d(%s)] map(%p:'%s'): "
  					"not on process' root volume nor preboot volume\n",
-@@ -2584,7 +2755,13 @@ after_root_check:
+@@ -2584,7 +2717,13 @@ after_root_check:
  		}
  #endif /* CONFIG_CSR */
  
@@ -243,7 +205,7 @@ index 8696353..c53f667 100644
  			char **expected_scdir_path = is_driverkit ? driverkit_scdir_path : scdir_path;
  			struct vnode *scdir_vp = NULL;
  			for (expected_scdir_path = is_driverkit ? driverkit_scdir_path : scdir_path;
-@@ -2689,6 +2866,9 @@ scdir_ok:
+@@ -2689,6 +2828,9 @@ scdir_ok:
  		}
  	}
  done:
@@ -253,7 +215,7 @@ index 8696353..c53f667 100644
  	if (error != 0) {
  		shared_region_map_and_slide_cleanup(p, files_count, *sr_file_mappings, shared_region);
  		*sr_file_mappings = NULL;
-@@ -2740,9 +2920,13 @@ _shared_region_map_and_slide(
+@@ -2740,9 +2882,13 @@ _shared_region_map_and_slide(
  	error = shared_region_map_and_slide_setup(p, files_count,
  	    files, mappings_count, mappings,
  	    &sr_file_mappings, &shared_region, rdir_vp);
@@ -267,7 +229,7 @@ index 8696353..c53f667 100644
  	}
  
  	/* map the file(s) into that shared region's submap */
-@@ -2782,7 +2966,9 @@ _shared_region_map_and_slide(
+@@ -2782,7 +2928,9 @@ _shared_region_map_and_slide(
  		OSBitAndAtomic(~((uint32_t)P_NOSHLIB), &p->p_flag);
  	}
  
@@ -277,7 +239,7 @@ index 8696353..c53f667 100644
  	shared_region_map_and_slide_cleanup(p, files_count, sr_file_mappings, shared_region);
  
  	SHARED_REGION_TRACE_DEBUG(
-@@ -2897,6 +3083,8 @@ shared_region_map_and_slide_2_np(
+@@ -2897,6 +3045,8 @@ shared_region_map_and_slide_2_np(
  	struct shared_file_mapping_slide_np *mappings = NULL;
  	kern_return_t                 kr = KERN_SUCCESS;
  
