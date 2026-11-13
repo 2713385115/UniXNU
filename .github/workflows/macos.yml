@@ -159,6 +159,9 @@ jobs:
           if [ -n "$DATA_SEED_URL" ]; then
             curl -fL "$DATA_SEED_URL" -o "$RUNNER_TEMP/data.dbr"
             if [ -n "$GROW_GIB" ]; then
+              # seed-data-grow.py builds its sparse scratch image inside build/, which
+              # does not exist yet this early in the job (the kernel build creates it).
+              mkdir -p build
               python3 scripts/seed-data-grow.py --gib "$GROW_GIB" "$RUNNER_TEMP/data.dbr" "$RUNNER_TEMP/data-grow.dbr"
               mv "$RUNNER_TEMP/data-grow.dbr" "$RUNNER_TEMP/data.dbr"
             fi
