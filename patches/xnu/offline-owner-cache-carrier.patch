@@ -1,6 +1,8 @@
+diff --git a/bsd/vm/vm_unix.c b/bsd/vm/vm_unix.c
+index 8696353..c53f667 100644
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
-@@ -2225,6 +2225,65 @@
+@@ -2225,6 +2225,153 @@ static void shared_region_map_and_slide_cleanup(
  	struct _sr_file_mappings *sr_file_mappings,
  	struct vm_shared_region  *shared_region);
  
@@ -23,6 +25,94 @@
 +	const char *cache_uuid = "9846FE78-2910-4297-AF97-D59BB6F8FC16";
 +#else
 +	const char *cache_uuid = "8846FE78-2910-4297-AF97-D59BB6F8FC16";
++#endif
++	const char *directory = "/private/preboot/System/Library/Caches/com.apple.dyld";
++	vnode_t expected_parent = NULLVP, device_vnode;
++	dev_t root_device = NODEV, cache_device = NODEV, expected = NODEV;
++	char device_path[64];
++	boolean_t authorized = FALSE;
++	mount_t root_mount, cache_mount;
++	int why = 0;
++
++	if (process_root != rootvnode) {
++		why = 1;
++		goto out;
++	}
++	if (!file || vnode_vtype(file) != VREG) {
++		why = 2;
++		goto out;
++	}
++	root_mount = vnode_mount(process_root);
++	cache_mount = vnode_mount(file);
++	if (!root_mount || !cache_mount || root_mount == cache_mount) {
++		why = 3;
++		goto out;
++	}
++	if (!(vfs_flags(root_mount) & MNT_RDONLY) || !(vfs_flags(cache_mount) & MNT_RDONLY)) {
++		why = 4;
++		goto out;
++	}
++	if (strcmp(vfs_statfs(root_mount)->f_fstypename, "apfs") ||
++	    strcmp(vfs_statfs(cache_mount)->f_fstypename, "apfs")) {
++		why = 5;
++		goto out;
++	}
++	device_vnode = vfs_devvp(root_mount);
++	if (device_vnode) {
++		root_device = vnode_specrdev(device_vnode);
++		vnode_put(device_vnode);
++	}
++	device_vnode = vfs_devvp(cache_mount);
++	if (device_vnode) {
++		cache_device = vnode_specrdev(device_vnode);
++		vnode_put(device_vnode);
++	}
++	if (root_device == NODEV || cache_device == NODEV) {
++		why = 6;
++		goto out;
++	}
++	if (!native_verified_block_volume_device(root_uuid, &expected, device_path, sizeof(device_path))) {
++		why = 7;
++		goto out;
++	}
++	if (expected != root_device) {
++		why = 8;
++		goto out;
++	}
++	if (!native_verified_block_volume_device(cache_uuid, &expected, device_path, sizeof(device_path))) {
++		why = 9;
++		goto out;
++	}
++	if (expected != cache_device) {
++		why = 10;
++		goto out;
++	}
++	if (vnode_lookup(directory, 0, &expected_parent, vfs_context_current())) {
++		why = 11;
++		goto out;
++	}
++	if (vnode_vtype(expected_parent) != VDIR) {
++		why = 12;
++	} else if (vnode_mount(expected_parent) != cache_mount) {
++		why = 13;
++	} else if (vnode_parent(file) != expected_parent) {
++		why = 14;
++	} else if (!native_verified_block_root_authorized(root_device)) {
++		why = 15;
++	} else {
++		authorized = TRUE;
++	}
++out:
++	if (expected_parent) vnode_put(expected_parent);
++	native_owner_cache_carrier_root_device = root_device;
++	native_owner_cache_carrier_file_device = cache_device;
++	if (authorized) os_atomic_inc(&native_owner_cache_carrier_accepts, relaxed);
++	else os_atomic_inc(&native_owner_cache_carrier_rejects, relaxed);
++	printf("SRT: carrier why=%d rootdev=0x%x cachedv=0x%x acc=%lu rej=%lu\n",
++	    why, (unsigned int)root_device, (unsigned int)cache_device,
++	    native_owner_cache_carrier_accepts, native_owner_cache_carrier_rejects);
++	return authorized;
++}
 +#endif
 +	const char *directory = "/private/preboot/System/Library/Caches/com.apple.dyld";
 +	vnode_t expected_parent = NULLVP, device_vnode;
@@ -66,13 +156,58 @@
  /*
   * Setup part of _shared_region_map_and_slide().
   * It had to be broken out of _shared_region_map_and_slide() to
-@@ -2557,7 +2616,13 @@
+@@ -2259,6 +2406,8 @@ shared_region_map_and_slide_setup(
+ 		(void *)VM_KERNEL_ADDRPERM(current_thread()),
+ 		proc_getpid(p), p->p_comm));
+ 
++	printf("SRT: setup pid=%d files=%u maps=%u\n",
++	    proc_getpid(p), files_count, mappings_count);
+ 	if (files_count > _SR_FILE_MAPPINGS_MAX_FILES) {
+ 		error = E2BIG;
+ 		goto done;
+@@ -2290,6 +2439,8 @@ shared_region_map_and_slide_setup(
+ 	/* get the process's shared region (setup in vm_map_exec()) */
+ 	shared_region = vm_shared_region_trim_and_get(current_task());
+ 	*shared_region_ptr = shared_region;
++	printf("SRT: sr=%d rdir_is_root=%d\n", shared_region != NULL,
++	    rdir_vp == rootvnode);
+ 	if (shared_region == NULL) {
+ 		SHARED_REGION_TRACE_ERROR(
+ 			("shared_region: %p [%d(%s)] map(): "
+@@ -2417,9 +2568,13 @@ shared_region_map_and_slide_setup(
+ 		 *       of the shared cache */
+ 		error = mac_file_check_mmap(vfs_context_ucred(vfs_context_current()),
+ 		    srfmp->fp->fp_glob, VM_PROT_ALL, MAP_FILE | MAP_PRIVATE | MAP_FIXED, 0, &maxprot);
++		printf("SRT: macf err=%d\n", error);
+ 		if (error) {
+ 			goto done;
+ 		}
++#endif /* MAC */		if (error) {
++			goto done;
++		}
+ #endif /* MAC */
+ 
+ #if XNU_TARGET_OS_OSX && defined(__arm64__)
+@@ -2499,6 +2654,7 @@ root_check:
+ 				error));
+ 			goto done;
+ 		}
++		printf("SRT: uid=%d\n", (int)va.va_uid);
+ 		if (va.va_uid != 0) {
+ 			SHARED_REGION_TRACE_ERROR(
+ 				("shared_region: %p [%d(%s)] map(%p:'%s'): "
+@@ -2557,7 +2713,18 @@ after_root_check:
  		 * is either on the root volume or in the preboot cryptex volume.
  		 */
  		assert(rdir_vp != NULL);
 +#if defined(XNU_OWNER_CACHE_CARRIER) && XNU_OWNER_CACHE_CARRIER
 +		boolean_t owner_carrier = FALSE;
 +#endif
++		printf("SRT: mountcmp same=%d rootro=%d cachero=%d name=%.40s\n",
++		    srfmp->vp->v_mount == rdir_vp->v_mount,
++		    (vfs_flags(rdir_vp->v_mount) & MNT_RDONLY) != 0,
++		    (vfs_flags(srfmp->vp->v_mount) & MNT_RDONLY) != 0,
++		    srfmp->vp->v_name);
  		if (srfmp->vp->v_mount != rdir_vp->v_mount) {
 +#if defined(XNU_OWNER_CACHE_CARRIER) && XNU_OWNER_CACHE_CARRIER
 +			owner_carrier = native_owner_shared_cache_carrier(rdir_vp, srfmp->vp);
@@ -80,7 +215,7 @@
  			vnode_t preboot_vp = NULL;
  #if XNU_TARGET_OS_OSX
  #define PREBOOT_CRYPTEX_PATH "/System/Volumes/Preboot/Cryptexes"
-@@ -2565,7 +2630,11 @@
+@@ -2565,7 +2732,11 @@ after_root_check:
  #define PREBOOT_CRYPTEX_PATH "/private/preboot/Cryptexes"
  #endif
  			error = vnode_lookup(PREBOOT_CRYPTEX_PATH, 0, &preboot_vp, vfs_context_current());
@@ -93,12 +228,14 @@
  				SHARED_REGION_TRACE_ERROR(
  					("shared_region: %p [%d(%s)] map(%p:'%s'): "
  					"not on process' root volume nor preboot volume\n",
-@@ -2584,7 +2653,11 @@
+@@ -2584,7 +2755,13 @@ after_root_check:
  		}
  #endif /* CONFIG_CSR */
  
 -		if (scdir_enforce) {
++		printf("SRT: scdir_enforce=%d\n", scdir_enforce);
 +		if (scdir_enforce
++#if defined(XNU_OWNER_CACHE_CARRIER) && XNU_OWNER_CACHE_CARRIER && !CONFIG_CSR		if (scdir_enforce
 +#if defined(XNU_OWNER_CACHE_CARRIER) && XNU_OWNER_CACHE_CARRIER && !CONFIG_CSR
 +		    && !owner_carrier
 +#endif
@@ -106,3 +243,46 @@
  			char **expected_scdir_path = is_driverkit ? driverkit_scdir_path : scdir_path;
  			struct vnode *scdir_vp = NULL;
  			for (expected_scdir_path = is_driverkit ? driverkit_scdir_path : scdir_path;
+@@ -2689,6 +2866,9 @@ scdir_ok:
+ 		}
+ 	}
+ done:
++	printf("SRT: setup done err=%d\n", error);
++	if (error != 0) {
++		shared_region_map_and_slide_cleanup(p, files_count, *sr_file_mappings, shared_region);done:
+ 	if (error != 0) {
+ 		shared_region_map_and_slide_cleanup(p, files_count, *sr_file_mappings, shared_region);
+ 		*sr_file_mappings = NULL;
+@@ -2740,9 +2920,13 @@ _shared_region_map_and_slide(
+ 	error = shared_region_map_and_slide_setup(p, files_count,
+ 	    files, mappings_count, mappings,
+ 	    &sr_file_mappings, &shared_region, rdir_vp);
++	printf("SRT: srs err=%d\n", error);
+ 	if (error != 0) {
+ 		vnode_put(rdir_vp);
+ 		return error;
++	}	if (error != 0) {
++		vnode_put(rdir_vp);
++		return error;
+ 	}
+ 
+ 	/* map the file(s) into that shared region's submap */
+@@ -2782,7 +2966,9 @@ _shared_region_map_and_slide(
+ 		OSBitAndAtomic(~((uint32_t)P_NOSHLIB), &p->p_flag);
+ 	}
+ 
++	printf("SRT: mapfile kr=0x%x err=%d\n", kr, error);
+ 	vnode_put(rdir_vp);
++	shared_region_map_and_slide_cleanup(p, files_count, sr_file_mappings, shared_region);	vnode_put(rdir_vp);
+ 	shared_region_map_and_slide_cleanup(p, files_count, sr_file_mappings, shared_region);
+ 
+ 	SHARED_REGION_TRACE_DEBUG(
+@@ -2897,6 +3083,8 @@ shared_region_map_and_slide_2_np(
+ 	struct shared_file_mapping_slide_np *mappings = NULL;
+ 	kern_return_t                 kr = KERN_SUCCESS;
+ 
++	printf("SRT: 2np enter pid=%d files=%u maps=%u\n",
++	    proc_getpid(p), uap->files_count, uap->mappings_count);
+ 	files_count = uap->files_count;
+ 	mappings_count = uap->mappings_count;
+ 
