@@ -124,7 +124,10 @@ def build(ctx, kernel=None):
     payloads.mkdir(parents=True)
     shutil.copyfile(kernel, payloads / 'kernel.macho')
     if spec.get('panic_screen'):
-        run(['python3', ctx.tree / 'scripts/patch-xnu-entry-probe.py', payloads / 'kernel.macho', '--panic-screen', '--no-reset'],
+        # The panic renderer needs Mu-Silicium's FrameBufferSerialPortLib/Font.h, which the
+        # CI checkout does not carry, so it cannot be built here. The stage bars (blue at the
+        # kernel entry, magenta before the MMU is enabled) are pure assembly and still patch.
+        run(['python3', ctx.tree / 'scripts/patch-xnu-entry-probe.py', payloads / 'kernel.macho', '--no-reset'],
             cwd=ctx.tree, env=dict(os.environ, UNIXNU_UEFI=str(ctx.uefi or '')), log_file=ctx.logs / 'payload-patch.log')
     if trust:
         shutil.copyfile(trust, payloads / 'kernel.macho.trustcache')
