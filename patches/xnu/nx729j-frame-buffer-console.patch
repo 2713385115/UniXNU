@@ -1,0 +1,29 @@
+diff --git a/pexpert/arm/pe_init.c b/pexpert/arm/pe_init.c
+--- a/pexpert/arm/pe_init.c
++++ b/pexpert/arm/pe_init.c
+@@ -429,4 +429,25 @@ PE_init_platform(boolean_t vm_initialized, void *args)
+ 		PE_state.video.v_display = boot_args_ptr->Video.v_display;
++		/*
++		 * nx729j: the loader publishes the GOP geometry but leaves the packed depth
++		 * byte of boot_args->Video at zero, and every console decision downstream is
++		 * gated on it: initialize_screen() reports d=00000000, vc_initialize() refuses
++		 * to map the surface, and the panel keeps the last frame the loader drew.  That
++		 * one zero is why this board has never shown a kernel message - every diagnostic
++		 * so far had to travel through a storage write, and the ones that raced a stalled
++		 * command were lost.
++		 *
++		 * The loader checks its mode against a 32-bit direct-colour GOP surface before it
++		 * publishes this geometry, so a stride of width * 4 identifies exactly that
++		 * surface.  Write the depth in both places a console can read it: PE_state for
++		 * the console this boot creates, and boot_args for anything that re-reads the
++		 * firmware structure.
++		 */
++		if (PE_state.video.v_depth == 0 && PE_state.video.v_baseAddr != 0 &&
++		    (uint32_t)PE_state.video.v_width >= 320 && (uint32_t)PE_state.video.v_height >= 240 &&
++		    PE_state.video.v_rowBytes >= (unsigned long)(uint32_t)PE_state.video.v_width * 4) {
++			PE_state.video.v_depth = 32;
++			boot_args_ptr->Video.v_depth = (uint32_t)32 << kBootVideoDepthDepthShift;
++		}
+ 		strlcpy(PE_state.video.v_pixelFormat, "BBBBBBBBGGGGGGGGRRRRRRRR", sizeof(PE_state.video.v_pixelFormat));
+ 	}
+ 	if (!vm_initialized) {
