@@ -1,0 +1,57 @@
+diff --git a/osfmk/kern/ext_paniclog.c b/osfmk/kern/ext_paniclog.c
+index c27243a..1debd4f 100644
+--- a/osfmk/kern/ext_paniclog.c
++++ b/osfmk/kern/ext_paniclog.c
+@@ -41,6 +41,14 @@
+ 
+ #if CONFIG_EXT_PANICLOG
+ 
++/*
++ * nx729j: the UFS boot-log window lives in drivers/NativeUfs/NativeUfs.cpp.
++ * Declared weak so a build without that driver still links; when the symbol is
++ * absent the panic text stays in debug_buf exactly as it did before.
++ */
++extern int native_ufs_panic_dump(const char *text, unsigned long len)
++    __attribute__((weak));
++
+ static LCK_GRP_DECLARE(ext_paniclog_lck_grp, "Extensible panic log locks");
+ static LCK_MTX_DECLARE(ext_paniclog_list_lock, &ext_paniclog_lck_grp);
+ 
+@@ -316,7 +324,16 @@ ext_paniclog_get_size_required(void)
+ bool
+ is_debug_ptr_in_ext_paniclog(void)
+ {
+-	bool ext_paniclog_exceeds = ((panic_info->eph_ext_paniclog_offset != 0) ?
++	/*
++	 * nx729j: nothing assigns panic_info on this board - the device tree has
++	 * no Apple PRAM reservation, and the volatile-panic-log patch replaces
++	 * check_for_panic_log() with a plain kernel buffer.  This function is the
++	 * first thing debug_putc() calls for every panic byte, so dereferencing a
++	 * NULL here faults on far=0xa1 (the field's offset) and takes every CPU
++	 * queued in the debugger down with it before a single character lands.
++	 */
++	bool ext_paniclog_exceeds =
++	    ((panic_info != NULL && panic_info->eph_ext_paniclog_offset != 0) ?
+ 	    ((uint32_t)(debug_buf_ptr - gPanicBase) >= panic_info->eph_ext_paniclog_offset) :
+ 	    false);
+ 
+@@ -345,6 +362,19 @@ ext_paniclog_write_panicdata(void)
+ 	uint32_t ext_paniclog_version = EXT_PANICLOG_VERSION;
+ 	char *dst = NULL;
+ 
++	/*
++	 * nx729j: the last point in the panic path that runs after the text has
++	 * been accumulated and while the panicking CPU can still issue I/O.  Both
++	 * early returns below apply on this board, so without this the text only
++	 * ever existed in debug_buf and was gone by the time the device came back
++	 * up in 9008.
++	 */
++	if (native_ufs_panic_dump != NULL && debug_buf_base != NULL &&
++	    debug_buf_ptr > debug_buf_base) {
++		native_ufs_panic_dump(debug_buf_base,
++		    (unsigned long)(debug_buf_ptr - debug_buf_base));
++	}
++
+ 	if (!OSCompareAndSwap8(0, 1, &ext_paniclog_panic_write_done) || (ext_paniclog_handle_count == 0)
+ 	    || (paniclog_buf_size < MAX_EXT_PANICLOG_SIZE)) {
+ 		return 0;
