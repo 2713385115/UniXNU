@@ -1,5 +1,5 @@
 diff --git a/bsd/vm/vm_unix.c b/bsd/vm/vm_unix.c
-index 8696353..69960a7 100644
+index 8696353..31bcb06 100644
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
 @@ -2225,6 +2225,115 @@ static void shared_region_map_and_slide_cleanup(
@@ -136,7 +136,7 @@ index 8696353..69960a7 100644
  	if (shared_region == NULL) {
  		SHARED_REGION_TRACE_ERROR(
  			("shared_region: %p [%d(%s)] map(): "
-@@ -2417,9 +2530,13 @@ shared_region_map_and_slide_setup(
+@@ -2417,6 +2530,7 @@ shared_region_map_and_slide_setup(
  		 *       of the shared cache */
  		error = mac_file_check_mmap(vfs_context_ucred(vfs_context_current()),
  		    srfmp->fp->fp_glob, VM_PROT_ALL, MAP_FILE | MAP_PRIVATE | MAP_FIXED, 0, &maxprot);
@@ -144,13 +144,7 @@ index 8696353..69960a7 100644
  		if (error) {
  			goto done;
  		}
-+#endif /* MAC */		if (error) {
-+			goto done;
-+		}
- #endif /* MAC */
- 
- #if XNU_TARGET_OS_OSX && defined(__arm64__)
-@@ -2499,6 +2616,7 @@ root_check:
+@@ -2499,6 +2613,7 @@ root_check:
  				error));
  			goto done;
  		}
@@ -158,7 +152,7 @@ index 8696353..69960a7 100644
  		if (va.va_uid != 0) {
  			SHARED_REGION_TRACE_ERROR(
  				("shared_region: %p [%d(%s)] map(%p:'%s'): "
-@@ -2557,7 +2675,18 @@ after_root_check:
+@@ -2557,7 +2672,18 @@ after_root_check:
  		 * is either on the root volume or in the preboot cryptex volume.
  		 */
  		assert(rdir_vp != NULL);
@@ -177,7 +171,7 @@ index 8696353..69960a7 100644
  			vnode_t preboot_vp = NULL;
  #if XNU_TARGET_OS_OSX
  #define PREBOOT_CRYPTEX_PATH "/System/Volumes/Preboot/Cryptexes"
-@@ -2565,7 +2694,11 @@ after_root_check:
+@@ -2565,7 +2691,11 @@ after_root_check:
  #define PREBOOT_CRYPTEX_PATH "/private/preboot/Cryptexes"
  #endif
  			error = vnode_lookup(PREBOOT_CRYPTEX_PATH, 0, &preboot_vp, vfs_context_current());
@@ -190,14 +184,13 @@ index 8696353..69960a7 100644
  				SHARED_REGION_TRACE_ERROR(
  					("shared_region: %p [%d(%s)] map(%p:'%s'): "
  					"not on process' root volume nor preboot volume\n",
-@@ -2584,7 +2717,13 @@ after_root_check:
+@@ -2584,7 +2714,12 @@ after_root_check:
  		}
  #endif /* CONFIG_CSR */
  
 -		if (scdir_enforce) {
 +		printf("SRT: scdir_enforce=%d\n", scdir_enforce);
 +		if (scdir_enforce
-+#if defined(XNU_OWNER_CACHE_CARRIER) && XNU_OWNER_CACHE_CARRIER && !CONFIG_CSR		if (scdir_enforce
 +#if defined(XNU_OWNER_CACHE_CARRIER) && XNU_OWNER_CACHE_CARRIER && !CONFIG_CSR
 +		    && !owner_carrier
 +#endif
@@ -205,17 +198,15 @@ index 8696353..69960a7 100644
  			char **expected_scdir_path = is_driverkit ? driverkit_scdir_path : scdir_path;
  			struct vnode *scdir_vp = NULL;
  			for (expected_scdir_path = is_driverkit ? driverkit_scdir_path : scdir_path;
-@@ -2689,6 +2828,9 @@ scdir_ok:
+@@ -2689,6 +2824,7 @@ scdir_ok:
  		}
  	}
  done:
 +	printf("SRT: setup done err=%d\n", error);
-+	if (error != 0) {
-+		shared_region_map_and_slide_cleanup(p, files_count, *sr_file_mappings, shared_region);done:
  	if (error != 0) {
  		shared_region_map_and_slide_cleanup(p, files_count, *sr_file_mappings, shared_region);
  		*sr_file_mappings = NULL;
-@@ -2740,9 +2882,13 @@ _shared_region_map_and_slide(
+@@ -2740,6 +2876,7 @@ _shared_region_map_and_slide(
  	error = shared_region_map_and_slide_setup(p, files_count,
  	    files, mappings_count, mappings,
  	    &sr_file_mappings, &shared_region, rdir_vp);
@@ -223,23 +214,15 @@ index 8696353..69960a7 100644
  	if (error != 0) {
  		vnode_put(rdir_vp);
  		return error;
-+	}	if (error != 0) {
-+		vnode_put(rdir_vp);
-+		return error;
- 	}
- 
- 	/* map the file(s) into that shared region's submap */
-@@ -2782,7 +2928,9 @@ _shared_region_map_and_slide(
+@@ -2782,6 +2919,7 @@ _shared_region_map_and_slide(
  		OSBitAndAtomic(~((uint32_t)P_NOSHLIB), &p->p_flag);
  	}
  
 +	printf("SRT: mapfile kr=0x%x err=%d\n", kr, error);
  	vnode_put(rdir_vp);
-+	shared_region_map_and_slide_cleanup(p, files_count, sr_file_mappings, shared_region);	vnode_put(rdir_vp);
  	shared_region_map_and_slide_cleanup(p, files_count, sr_file_mappings, shared_region);
  
- 	SHARED_REGION_TRACE_DEBUG(
-@@ -2897,6 +3045,8 @@ shared_region_map_and_slide_2_np(
+@@ -2897,6 +3035,8 @@ shared_region_map_and_slide_2_np(
  	struct shared_file_mapping_slide_np *mappings = NULL;
  	kern_return_t                 kr = KERN_SUCCESS;
  
