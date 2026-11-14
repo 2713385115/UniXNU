@@ -1,3 +1,5 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+index 8bba078..9d5c489 100644
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
 @@ -183,7 +183,7 @@
@@ -9,7 +11,7 @@
  
  #include <mach/exclaves.h>
  
-@@ -7013,8 +7013,253 @@
+@@ -7013,8 +7013,267 @@ create_unix_stack(vm_map_t map, load_result_t* load_result,
   *		word width of the kernel. Once the self-exec completes, the
   *		initproc might be different.
   */
@@ -57,10 +59,11 @@
 +#endif
 +	const char *mountpoint = "/";
 +#else
-+	const char *mountpoint = "/private/preboot";
++	const char *mountpoint = "/private/preboot/Cryptexes/OS";
++	const char *mountpoint_fallback = "/private/preboot";
 +#endif
 +#if !defined(XNU_OWNER_UNION_SYSTEMOS) || !XNU_OWNER_UNION_SYSTEMOS
-+	const char *environment = "DYLD_SHARED_CACHE_DIR=/private/preboot/System/Library/Caches/com.apple.dyld";
++	const char *environment = "DYLD_SHARED_CACHE_DIR=/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld";
 +#endif
 +	vnode_t original_os_root = rootvnode;
 +	native_owner_cache_original_root = (uintptr_t)original_os_root;
@@ -101,6 +104,19 @@
 +	strlcpy(native_owner_cache_device_path, device_path, sizeof(native_owner_cache_device_path));
 +	native_owner_cache_selected_device = selected;
 +	native_owner_cache_stage = 2;
++	{
++		/* The iOS cryptex mount point is /private/preboot/Cryptexes/OS, and
++		 * /System/Cryptexes/OS is a symlink onto it, so dyld finds the shared
++		 * cache through its own default path.  Fall back to bare
++		 * /private/preboot when this root image has no Cryptexes/OS pair. */
++		vnode_t probe_vp = NULLVP;
++		if (vnode_lookup(mountpoint, 0, &probe_vp, vfs_context_current()) != 0) {
++			mountpoint = mountpoint_fallback;
++		} else {
++			vnode_put(probe_vp);
++		}
++		printf("SRT: cache mount target %s\n", mountpoint);
++	}
 +	/* Exact user-mount payload already qualified against this original APFS. */
 +	memcpy(mount_data, &spec, sizeof(spec));
 +	memcpy(mount_data + 8, &mount_flags, sizeof(mount_flags));
@@ -264,7 +280,7 @@
  {
  	int retval[2];
  	int error;
-@@ -7086,7 +7326,7 @@
+@@ -7086,7 +7345,7 @@ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
  	 */
  	init_exec_args.fname = argv0;
  	init_exec_args.argp = scratch_addr;
@@ -273,7 +289,7 @@
  
  	/*
  	 * So that init task is set with uid,gid 0 token
-@@ -7148,6 +7388,15 @@
+@@ -7148,6 +7407,15 @@ load_init_program(proc_t p)
  	mach_vm_size_t map_page_size = vm_map_page_size(map);
  
  	(void) mach_vm_allocate_kernel(map, &scratch_addr, map_page_size, VM_FLAGS_ANYWHERE, VM_KERN_MEMORY_NONE);
@@ -289,7 +305,7 @@
  #if CONFIG_MEMORYSTATUS
  	(void) memorystatus_init_at_boot_snapshot();
  #endif /* CONFIG_MEMORYSTATUS */
-@@ -7162,7 +7411,7 @@
+@@ -7162,7 +7430,7 @@ load_init_program(proc_t p)
  
  		if (is_release_suffix) {
  			printf("load_init_program: attempting to load /sbin/launchd\n");
@@ -298,7 +314,7 @@
  			if (!error) {
  				return;
  			}
-@@ -7173,7 +7422,7 @@
+@@ -7173,7 +7441,7 @@ load_init_program(proc_t p)
  			strlcat(launchd_path, launchd_suffix, sizeof(launchd_path));
  
  			printf("load_init_program: attempting to load %s\n", launchd_path);
@@ -307,7 +323,7 @@
  			if (!error) {
  				return;
  			} else if (error != ENOENT) {
-@@ -7186,7 +7435,7 @@
+@@ -7186,7 +7454,7 @@ load_init_program(proc_t p)
  	error = ENOENT;
  	for (i = 0; i < sizeof(init_programs) / sizeof(init_programs[0]); i++) {
  		printf("load_init_program: attempting to load %s\n", init_programs[i]);
