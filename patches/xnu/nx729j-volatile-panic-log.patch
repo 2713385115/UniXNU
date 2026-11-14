@@ -12,10 +12,29 @@ index 433b6cd..a1c2956 100644
  
  #if (DEVELOPMENT || DEBUG) && defined(XNU_TARGET_OS_BRIDGE)
  /*
-@@ -523,7 +526,39 @@ PE_create_console(void)
+@@ -523,7 +526,58 @@ PE_create_console(void)
  	 * Check the head of VRAM for a panic log saved on last panic.
  	 * Do this before the VRAM is trashed.
  	 */
++	/*
++	 * nx729j: the loader publishes the GOP geometry but leaves the packed depth
++	 * byte of boot_args->Video at zero, and every console decision downstream is
++	 * gated on v_depth: initialize_screen() reports d=00000000, vc_initialize()
++	 * refuses to map the surface, and the panel keeps the last frame the loader
++	 * drew.  That one zero is why this board has never had a console - every
++	 * diagnostic so far had to travel through a storage write, and the ones that
++	 * raced a stalled command were lost.  The loader has already verified that the
++	 * stride matches a 32-bit direct-colour GOP mode, so a width * 4 stride means
++	 * exactly that surface; adopt it instead of booting blind.
++	 */
++	if (PE_state.video.v_depth == 0 && PE_state.video.v_baseAddr != 0 &&
++	    PE_state.video.v_width >= 320 && PE_state.video.v_height >= 240 &&
++	    PE_state.video.v_rowBytes >= (unsigned long)PE_state.video.v_width * 4) {
++		PE_state.video.v_depth = 32;
++		printf("nx729j: console on frame buffer, %lux%lu, %lu bytes a row, base %p\n",
++		    (unsigned long)PE_state.video.v_width, (unsigned long)PE_state.video.v_height,
++		    (unsigned long)PE_state.video.v_rowBytes, (void *)PE_state.video.v_baseAddr);
++	}
 +#if defined(XNU_NX729J_VOLATILE_PANIC_LOG) && XNU_NX729J_VOLATILE_PANIC_LOG
 +	/*
 +	 * The nx729j device tree has no Apple PRAM reservation, so the standard
