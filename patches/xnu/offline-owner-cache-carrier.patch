@@ -1,5 +1,5 @@
 diff --git a/bsd/vm/vm_unix.c b/bsd/vm/vm_unix.c
-index 8696353..31bcb06 100644
+index 8696353..5956546 100644
 --- a/bsd/vm/vm_unix.c
 +++ b/bsd/vm/vm_unix.c
 @@ -2225,6 +2225,115 @@ static void shared_region_map_and_slide_cleanup(
@@ -26,7 +26,7 @@ index 8696353..31bcb06 100644
 +#else
 +	const char *cache_uuid = "8846FE78-2910-4297-AF97-D59BB6F8FC16";
 +#endif
-+	const char *directory = "/private/preboot/System/Library/Caches/com.apple.dyld";
++	const char *directory = "/private/preboot/Cryptexes/OS/System/Library/Caches/com.apple.dyld";
 +	vnode_t expected_parent = NULLVP, device_vnode;
 +	dev_t root_device = NODEV, cache_device = NODEV, expected = NODEV;
 +	char device_path[64];
