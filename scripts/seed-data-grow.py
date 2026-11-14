@@ -116,6 +116,25 @@ def main():
             run('diskutil', 'apfs', 'resizeContainer', container, '0')
         finally:
             subprocess.run(['hdiutil', 'detach', store, '-force'], capture_output=True)
+        # nx729j: the seed this board ships with carries /mobile/tmp and nothing else.  iOS
+        # expects the rest of /private/var to exist already: tzinit exits 2, the coredump
+        # writer cannot open /private/var/cores/tzinit.core (ENOENT), and launchd turns either
+        # into "boot task failure" and reboots into a panic.  Create the tree here, while the
+        # image is attached anyway.  A failure is reported, never fatal - growing the container
+        # is still useful on its own.
+        try:
+            makepoints = [Path(scratch) / 'mnt']
+            makepoints[0].mkdir()
+            run('hdiutil', 'attach', '-imagekey', 'diskimage-class=CRawDiskImage',
+                '-mountpoint', str(makepoints[0]), '-nobrowse', str(raw))
+            try:
+                for rel in ('db', 'db/timezone', 'db/com.apple.dt.Xcode', 'log', 'cores',
+                            'mobile/tmp', 'tmp', 'run', 'root', 'db/dyld'):
+                    (makepoints[0] / rel).mkdir(parents=True, exist_ok=True)
+            finally:
+                subprocess.run(['hdiutil', 'detach', str(makepoints[0]), '-force'], capture_output=True)
+        except Exception as exc:                                  # noqa: BLE001 - keep the build
+            print('seed directory tree skipped:', exc)
         header = raw.open('rb').read(4096)
         if header[32:36] != b'NXSB':
             sys.exit('The grown image does not start with an APFS container')
