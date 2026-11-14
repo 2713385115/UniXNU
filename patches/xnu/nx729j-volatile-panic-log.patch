@@ -1,5 +1,5 @@
 diff --git a/pexpert/arm/pe_init.c b/pexpert/arm/pe_init.c
-index f3532cc..127e132 100644
+index 433b6cd..a1c2956 100644
 --- a/pexpert/arm/pe_init.c
 +++ b/pexpert/arm/pe_init.c
 @@ -73,6 +73,9 @@ clock_frequency_info_t gPEClockFrequencyInfo;
@@ -12,7 +12,7 @@ index f3532cc..127e132 100644
  
  #if (DEVELOPMENT || DEBUG) && defined(XNU_TARGET_OS_BRIDGE)
  /*
-@@ -532,6 +532,20 @@ void PE_create_console(void)
+@@ -523,7 +526,39 @@ PE_create_console(void)
  	 * Check the head of VRAM for a panic log saved on last panic.
  	 * Do this before the VRAM is trashed.
  	 */
@@ -28,8 +28,27 @@ index f3532cc..127e132 100644
 +	gPanicBase = (vm_offset_t)nx729j_volatile_panic_log;
 +	gPanicSize = sizeof(nx729j_volatile_panic_log);
 +	panic_text_len = gPanicSize - sizeof(struct embedded_panic_header);
++	/*
++	 * Everything downstream dereferences this pointer without testing it.
++	 * paniclog_flush() stamps eph_* through it, SavePanicInfo() reads and writes
++	 * the same header, and is_debug_ptr_in_ext_paniclog() reads it once per debug
++	 * byte.  On this board nothing ever assigned it: check_for_panic_log() is the
++	 * only writer and it is precisely the call this branch replaces.  That left
++	 * every panic dying in its own printing path - far=0xa1 in the first boot,
++	 * then far=0x14 and far=0x24 once that one was guarded.
++	 *
++	 * Point it at the head of the same buffer and give it a well-formed header so
++	 * the panic machinery takes its normal path: an all-zero header would still
++	 * pass the magic test with a printf warning.  eph_ext_paniclog_offset stays 0,
++	 * which keeps the ext-paniclog split disabled - there are no handles here.
++	 */
++	panic_info = (struct embedded_panic_header *)gPanicBase;
++	bzero(panic_info, sizeof(struct embedded_panic_header));
++	panic_info->eph_magic = EMBEDDED_PANIC_MAGIC;
++	panic_info->eph_version = EMBEDDED_PANIC_HEADER_CURRENT_VERSION;
 +#else
  	check_for_panic_log();
 +#endif
  
  	if (PE_state.video.v_display) {
+ 		PE_initialize_console(&PE_state.video, kPEGraphicsMode);
