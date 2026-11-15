@@ -1,0 +1,54 @@
+name: Data seed skip-setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed_url:
+        description: URL of the DBRDISK1 Data seed to edit
+        required: true
+        default: "https://raw.githubusercontent.com/2713385115/UniXNU/main/ci-inputs/nx729j-data-seed.dbr"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # drivers/DarwinBoot is a submodule that this job does not need in full.
+      # The seed tool imports only drivers/DarwinBoot/Test/packed_ramdisk.py.
+      - name: Stage the packed ramdisk helper
+        run: |
+          set -euo pipefail
+          mkdir -p drivers/DarwinBoot/Test build
+          cp ci-inputs/packed_ramdisk.py drivers/DarwinBoot/Test/packed_ramdisk.py
+          python3 -c "import sys; sys.path.insert(0, 'drivers/DarwinBoot/Test'); import packed_ramdisk; print('packed_ramdisk OK')"
+
+      - name: Fetch the Data seed
+        run: |
+          set -euo pipefail
+          curl -fL "${{ inputs.seed_url }}" -o build/base.dbr
+          python3 - <<'PY'
+          from pathlib import Path
+          b = Path('build/base.dbr').read_bytes()
+          assert b[:8] == b'DBRDISK1', b[:16]
+          print('base seed', len(b), 'bytes')
+          PY
+
+      - name: Run the official skip-setup tool
+        run: |
+          set -euo pipefail
+          python3 scripts/seed-data-skip-setup.py build/base.dbr build/data-skip-setup.dbr
+          ls -l build/data-skip-setup.dbr build/data-skip-setup.json
+          cat build/data-skip-setup.json
+
+      - name: Upload the edited seed
+        uses: actions/upload-artifact@v4
+        with:
+          name: data-skip-setup
+          path: |
+            build/data-skip-setup.dbr
+            build/data-skip-setup.json
+          if-no-files-found: error
