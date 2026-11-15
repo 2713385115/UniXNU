@@ -34,6 +34,11 @@ jobs:
           ref: main
           path: unixnu
 
+      - name: Select Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Toolchain report
         run: |
           uname -a
@@ -47,7 +52,8 @@ jobs:
           set -e
           brew install --quiet meson ninja glslang bison flex
           python3 -m venv .cache/mesa-venv
-          .cache/mesa-venv/bin/pip install --quiet --upgrade pip meson
+          .cache/mesa-venv/bin/pip install --quiet --upgrade pip meson packaging mako pyyaml setuptools
+          .cache/mesa-venv/bin/python -c "import packaging, mako, yaml, setuptools; print('python modules ok')"
           mkdir -p .cache/mesa-tools/bin
           ln -sf "$(brew --prefix bison)/bin/bison" .cache/mesa-tools/bin/bison
           if [ -x "$(brew --prefix flex)/bin/flex" ]; then ln -sf "$(brew --prefix flex)/bin/flex" .cache/mesa-tools/bin/flex; fi
