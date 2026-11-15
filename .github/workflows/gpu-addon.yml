@@ -1,0 +1,125 @@
+name: GPU addon (NGPUADD2)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: macOS runner label
+        required: false
+        default: macos-latest
+      mesa_mirror:
+        description: Mesa git mirror (fallback to the pinned repository)
+        required: false
+        default: https://chromium.googlesource.com/external/gitlab.freedesktop.org/mesa/mesa
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpu-addon-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  addon:
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
+    timeout-minutes: 330
+    defaults:
+      run:
+        working-directory: unixnu
+    steps:
+      - name: Checkout UniXNU
+        uses: actions/checkout@v4
+        with:
+          repository: 2713385115/UniXNU
+          ref: main
+          path: unixnu
+
+      - name: Toolchain report
+        run: |
+          uname -a
+          xcodebuild -version || true
+          xcrun --sdk iphoneos --show-sdk-path
+          python3 --version
+          git --version
+
+      - name: Install host tools
+        run: |
+          set -e
+          brew install --quiet meson ninja glslang bison flex
+          python3 -m venv .cache/mesa-venv
+          .cache/mesa-venv/bin/pip install --quiet --upgrade pip meson
+          mkdir -p .cache/mesa-tools/bin
+          ln -sf "$(brew --prefix bison)/bin/bison" .cache/mesa-tools/bin/bison
+          if [ -x "$(brew --prefix flex)/bin/flex" ]; then ln -sf "$(brew --prefix flex)/bin/flex" .cache/mesa-tools/bin/flex; fi
+          echo "PATH=$PWD/.cache/mesa-tools/bin:$PWD/.cache/mesa-venv/bin:$PATH" >> "$GITHUB_ENV"
+          glslangValidator --version || true
+          .cache/mesa-venv/bin/meson --version
+          .cache/mesa-tools/bin/bison --version | head -1
+
+      - name: Clone pinned Mesa and apply recorded patches
+        env:
+          MESA_MIRROR: ${{ inputs.mesa_mirror }}
+        run: |
+          set -e
+          python3 - <<'PY'
+          import json, os, shutil, subprocess, pathlib
+          pins = json.loads(pathlib.Path('scripts/data/adreno-compiler-inputs.json').read_text())
+          src = pathlib.Path('.cache/mesa-work')
+          if src.exists():
+              shutil.rmtree(src)
+          mirror = os.environ.get('MESA_MIRROR') or pins['mesa']['mirror']
+          try:
+              subprocess.run(['git', 'clone', '--filter=blob:none', '--no-checkout', mirror, str(src)], check=True)
+          except subprocess.CalledProcessError:
+              shutil.rmtree(src, ignore_errors=True)
+              subprocess.run(['git', 'clone', '--filter=blob:none', '--no-checkout',
+                              pins['mesa']['repository'], str(src)], check=True)
+          subprocess.run(['git', '-C', str(src), 'sparse-checkout', 'init', '--cone'], check=True)
+          subprocess.run(['git', '-C', str(src), 'sparse-checkout', 'set'] + pins['mesa']['sparse_directories'], check=True)
+          subprocess.run(['git', '-C', str(src), 'checkout', pins['mesa']['commit']], check=True)
+          for patch in pins['patches']:
+              subprocess.run(['git', '-C', str(src), 'apply', str(pathlib.Path(patch).resolve())], check=True)
+          print('pinned mesa', pins['mesa']['commit'], 'patches', len(pins['patches']))
+          PY
+          git -C .cache/mesa-work rev-parse HEAD
+          git -C .cache/mesa-work diff --stat | tail -12
+
+      - name: Build Turnip for iOS
+        run: |
+          set -e
+          python3 scripts/build-turnip-darwin.py --target ios
+          ls -l build/mesa-tu-ios/src/freedreno/vulkan/libvulkan_freedreno.dylib
+
+      - name: Build Adreno Metal plugin
+        run: |
+          set -e
+          python3 scripts/build-adreno-metal-plugin.py
+          ls -la build/adreno-metal-plugin/
+
+      - name: Pack NGPUADD2 with publish marker
+        run: |
+          set -e
+          python3 scripts/make-gpu-addon.py --publish build/gpu-addon.bin
+          python3 - <<'PY'
+          import pathlib, struct
+          d = pathlib.Path('build/gpu-addon.bin').read_bytes()
+          assert d[:8] == b'NGPUADD2', d[:8]
+          count, zero, total = struct.unpack_from('<IIQ', d, 8)
+          assert total == len(d), (total, len(d))
+          assert count > 0
+          print('NGPUADD2 ok: files=%d bytes=%d' % (count, len(d)))
+          PY
+
+      - name: Upload addon and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-addon-ngpuadd2
+          path: |
+            unixnu/build/gpu-addon.bin
+            unixnu/build/adreno-metal-plugin/trust.json
+            unixnu/build/mesa-tu-ios/builtin-build-profile.json
+            unixnu/.cache/mesa-tu-ios-configure.log
+            unixnu/.cache/mesa-tu-ios-build.log
+          if-no-files-found: warn
+          retention-days: 14
