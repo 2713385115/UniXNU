@@ -51,7 +51,8 @@ jobs:
       - name: Install host tools
         run: |
           set -e
-          brew install --quiet meson ninja glslang bison flex llvm shaderc spirv-tools
+          brew install --quiet meson ninja glslang bison flex llvm shaderc spirv-tools vulkan-headers
+          test -f /opt/homebrew/include/vulkan/vulkan.h
           python3 -m venv .cache/mesa-venv
           .cache/mesa-venv/bin/pip install --quiet --upgrade pip meson packaging mako pyyaml setuptools
           .cache/mesa-venv/bin/python -c "import packaging, mako, yaml, setuptools; print('python modules ok')"
@@ -128,6 +129,76 @@ jobs:
           python3 scripts/build-turnip-darwin.py --target ios
           ls -l build/mesa-tu-ios/src/freedreno/vulkan/libvulkan_freedreno.dylib
 
+      # gen-turnip-replay.py needs the host Turnip ICD plus the host kernel-stack shim and
+      # plugin_smoke binary. The repo's full check-turnip-darwin-host.py qualification chain
+      # references scripts/check-quartzcore-turnip-cache-host.py (absent from this repo) and
+      # committed shader-cache baselines, so build only the replay inputs here instead.
+      - name: Build Turnip for host
+        run: |
+          set -e
+          python3 scripts/build-turnip-darwin.py --target host
+          ls -l build/mesa-tu/src/freedreno/vulkan/libvulkan_freedreno.dylib
+
+      - name: Prepare host replay inputs
+        run: |
+          set -e
+          python3 - <<'PY'
+          import subprocess, sys
+          from pathlib import Path
+          ROOT = Path('.').resolve()
+          kit = ROOT / 'drivers/NativeAdreno'
+          sim = kit / 'tests/hostsim'
+          smmu = ROOT / 'kits/ArmSmmu4K'
+          out = ROOT / 'build/turnip-darwin-host'
+          out.mkdir(parents=True, exist_ok=True)
+          assert (ROOT / 'build/mesa-tu/src/freedreno/vulkan/libvulkan_freedreno.dylib').is_file()
+          subprocess.run([sys.executable, ROOT / 'scripts/gen-turnip-smoke-shaders.py'], check=True)
+          includes = out / 'host-include'
+          for name in ['IOKit/IOTypes.h', 'IOKit/IOReturn.h', 'IOKit/IOBufferMemoryDescriptor.h',
+                       'IOKit/IOLib.h', 'kern/task.h']:
+              path = includes / name
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_text('#include "XnuMemoryFixture.h"\n')
+          objects = []
+          for stem in ['ArmSmmu4KContext', 'ArmSmmu4KProgram', 'ArmSmmu4KLive',
+                       'ArmSmmu4KStreams', 'ArmSmmu4KMmio']:
+              obj = out / (stem + '.o')
+              subprocess.run(['xcrun', 'clang', '-std=c11', '-O1', '-fPIC', '-c',
+                              smmu / (stem + '.c'), '-o', obj], check=True)
+              objects.append(obj)
+          obj = out / 'AdrenoPM4.o'
+          subprocess.run(['xcrun', 'clang', '-std=c11', '-O1', '-fPIC', '-c',
+                          ROOT / 'kits/AdrenoPM4/AdrenoPM4.c', '-o', obj], check=True)
+          objects.append(obj)
+          service = out / 'host_gpu_service.o'
+          subprocess.run(['xcrun', 'clang++', '-std=c++23', '-O1', '-fPIC', '-I', includes,
+                          '-I', sim.parent, '-I', kit, '-I', smmu, '-I', ROOT / 'kits/AdrenoPM4',
+                          '-c', sim / 'host_gpu_service.cpp', '-o', service], check=True)
+          core = []
+          for name in ['NativeAdrenoMemory', 'NativeAdrenoSmmuMemory', 'NativeAdrenoVm', 'NativeAdrenoRing',
+                       'NativeAdrenoSubmit', 'NativeAdrenoUserClient', 'NativeAdrenoTimer',
+                       'NativeAdrenoSmmuContext', 'NativeAdrenoGpuContext']:
+              o = out / (name + '.o')
+              subprocess.run(['xcrun', 'clang++', '-std=c++23', '-O1', '-fPIC', '-I', includes,
+                              '-I', sim.parent, '-I', kit, '-I', smmu, '-I', ROOT / 'kits/AdrenoPM4',
+                              '-c', kit / (name + '.cpp'), '-o', o], check=True)
+              core.append(o)
+          shim_obj = out / 'host_iokit_shim.o'
+          subprocess.run(['xcrun', 'clang++', '-std=c++17', '-O1', '-fPIC', '-c',
+                          sim / 'host_iokit_shim.cpp', '-o', shim_obj], check=True)
+          shim = out / 'libhostiokit.dylib'
+          subprocess.run(['xcrun', 'clang++', '-dynamiclib', '-o', shim, service, shim_obj, *core, *objects,
+                          '-framework', 'IOKit', '-framework', 'CoreFoundation'], check=True)
+          plugin_smoke = out / 'plugin_smoke'
+          subprocess.run(['xcrun', 'clang++', '-std=c++17', '-O1', '-I', ROOT / 'drivers/NativeMetal',
+                          '-I', ROOT / '.cache/mesa-work/include', '-I', ROOT / 'build/turnip-smoke',
+                          '-I', '/opt/homebrew/include', sim / 'plugin_smoke.cpp', '-o', plugin_smoke], check=True)
+          print('PASS: host replay inputs', shim, plugin_smoke)
+          PY
+          test -x build/turnip-darwin-host/plugin_smoke
+          test -f build/turnip-darwin-host/libhostiokit.dylib
+          test -f build/turnip-smoke/NativeTurnipShaders.h
+
       - name: Build Adreno Metal plugin
         run: |
           set -e
@@ -159,5 +230,8 @@ jobs:
             unixnu/build/mesa-tu-ios/builtin-build-profile.json
             unixnu/.cache/mesa-tu-ios-configure.log
             unixnu/.cache/mesa-tu-ios-build.log
+            unixnu/.cache/mesa-tu-host-configure.log
+            unixnu/.cache/mesa-tu-host-build.log
+            unixnu/build/native-metal-bridge/build-ios.log
           if-no-files-found: warn
           retention-days: 14
