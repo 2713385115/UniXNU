@@ -33,6 +33,7 @@ jobs:
           repository: 2713385115/UniXNU
           ref: main
           path: unixnu
+          submodules: true
 
       - name: Select Python 3.12
         uses: actions/setup-python@v5
@@ -50,10 +51,13 @@ jobs:
       - name: Install host tools
         run: |
           set -e
-          brew install --quiet meson ninja glslang bison flex
+          brew install --quiet meson ninja glslang bison flex llvm shaderc spirv-tools
           python3 -m venv .cache/mesa-venv
           .cache/mesa-venv/bin/pip install --quiet --upgrade pip meson packaging mako pyyaml setuptools
           .cache/mesa-venv/bin/python -c "import packaging, mako, yaml, setuptools; print('python modules ok')"
+          glslc --version | head -2 || true
+          spirv-val --version || true
+          ls -l /opt/homebrew/opt/llvm/bin/llvm-as || true
           mkdir -p .cache/mesa-tools/bin
           ln -sf "$(brew --prefix bison)/bin/bison" .cache/mesa-tools/bin/bison
           if [ -x "$(brew --prefix flex)/bin/flex" ]; then ln -sf "$(brew --prefix flex)/bin/flex" .cache/mesa-tools/bin/flex; fi
@@ -61,6 +65,34 @@ jobs:
           glslangValidator --version || true
           .cache/mesa-venv/bin/meson --version
           .cache/mesa-tools/bin/bison --version | head -1
+
+      - name: Prepare Rust toolchain
+        run: |
+          set -e
+          if ! command -v rustup > /dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "PATH=$HOME/.cargo/bin:$PATH" >> "$GITHUB_ENV"
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup target add aarch64-apple-ios --toolchain 1.98.0
+          rustc +1.98.0 --version
+
+      - name: Clone pinned metal2vulkan translator
+        run: |
+          set -e
+          python3 - <<'PY'
+          import json, pathlib, shutil, subprocess
+          pins = json.loads(pathlib.Path('scripts/data/gpu-metal-vulkan-inputs.json').read_text())
+          t = pins['translator']
+          src = pathlib.Path('.cache/gpu-reference/metal2vulkan')
+          if src.exists():
+              shutil.rmtree(src)
+          src.parent.mkdir(parents=True, exist_ok=True)
+          subprocess.run(['git', 'clone', '--filter=blob:none', t['repository'], str(src)], check=True)
+          subprocess.run(['git', '-C', str(src), 'checkout', t['commit']], check=True)
+          print('translator pinned at', t['commit'])
+          PY
 
       - name: Clone pinned Mesa and apply recorded patches
         env:
