@@ -57,16 +57,16 @@ index 8bba078..e598de1 100644
 +#error The owner composition requires the original native union-mount implementation
 +#endif
 +	const char *mountpoint = "/";
++	const char *mountpoint_fallback = "/private/preboot";
 +#else
 +	const char *mountpoint = "/private/preboot/Cryptexes/OS";
 +	const char *mountpoint_fallback = "/private/preboot";
 +#endif
-+#if !defined(XNU_OWNER_UNION_SYSTEMOS) || !XNU_OWNER_UNION_SYSTEMOS
-+	/* Must follow the mount point actually chosen below: dyld only looks in
-+	 * /System/Cryptexes/OS when that symlink resolves, and the fallback keeps
-+	 * the volume one level higher. */
++	/* Both compositions keep these two live: the fallback lookup below and the
++	 * DYLD_SHARED_CACHE_DIR string always run, only its copyout is union-free,
++	 * and the union target is "/" itself so the fallback is never selected. */
 +	char environment[192] = {0};
-+#endif
++	/* Declared for both compositions on purpose: union changes use, not scope. */
 +	vnode_t original_os_root = rootvnode;
 +	native_owner_cache_original_root = (uintptr_t)original_os_root;
 +	mount_t root_mount = vnode_mount(original_os_root);
